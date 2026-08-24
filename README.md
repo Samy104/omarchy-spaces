@@ -11,6 +11,20 @@ Omarchy already has workspaces, which are about window layout. Spaces are about
 identity. You can be on workspace 3 in either context, and the difference that
 matters is whether a Slack message should interrupt you.
 
+## Screenshots
+
+<img src="docs/screenshots/bar-indicator.png" alt="The bar indicator" width="620">
+
+The bar shows the active space. Click it for the picker, which switches spaces
+and opens the settings app.
+
+<img src="docs/screenshots/picker.png" alt="The Spaces picker" width="440">
+
+<img src="docs/screenshots/general.png" alt="General settings" width="720">
+
+More in [docs/screenshots](docs/screenshots), and every page is walked through
+in the [documentation](#documentation).
+
 ## What it does
 
 Switch with a hotkey, the bar widget, or the CLI. The active space decides:
@@ -194,7 +208,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.9.0, running on Omarchy 4.0.0 with no QML warnings.
+Version 0.9.1, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -270,6 +284,7 @@ Full docs live in [`docs/`](docs/), and are mirrored to the
 [wiki](https://github.com/Samy104/omarchy-spaces/wiki).
 
 - [Installation](docs/Installation.md)
+- [Screenshots](docs/Screenshots.md)
 - [Creating a space](docs/Creating-a-space.md)
 - [Editing a space](docs/Editing-a-space.md)
 - [Defaults and inheritance](docs/Defaults-and-inheritance.md)

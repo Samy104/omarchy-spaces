@@ -11,9 +11,18 @@ Omarchy already has workspaces, which decide window layout. Spaces decide
 identity. You can be on workspace 3 in either context, and the difference that
 matters is whether a work message should interrupt your evening.
 
+## What it looks like
+
+<img src="https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/bar-indicator.png" alt="The bar indicator" width="620">
+
+<img src="https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/picker.png" alt="The Spaces picker" width="440">
+
+<img src="https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/general.png" alt="General settings" width="760">
+
 ## Start here
 
 - [Installation](Installation)
+- [Screenshots](Screenshots)
 - [Creating a space](Creating-a-space)
 - [Editing a space](Editing-a-space)
 - [Defaults and inheritance](Defaults-and-inheritance)

@@ -278,6 +278,16 @@ Item {
     }
   }
 
+  // Both the directory and the file, because the two ways of saving a file
+  // produce different events and each watcher misses one of them.
+  //
+  //   atomic rename (the CLI, most editors)  -> directory event, no file event
+  //                                             the watched inode is replaced
+  //   in-place write (nano, cat >, sed -i)   -> file event, no directory event
+  //                                             the directory did not change
+  //
+  // Watching only the directory was the original bug: editing spaces.json by
+  // hand in an in-place editor changed nothing until the shell restarted.
   FileView {
     path: service.configDir
     watchChanges: true
@@ -286,10 +296,26 @@ Item {
   }
 
   FileView {
+    path: service.configPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: configProbe.running = true
+    onLoadFailed: { /* not written yet; the directory watcher covers creation */ }
+  }
+
+  FileView {
     path: service.stateDir
     watchChanges: true
     printErrors: false
     onFileChanged: activeProbe.running = true
+  }
+
+  FileView {
+    path: service.activePath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: activeProbe.running = true
+    onLoadFailed: { /* no state file until the first switch */ }
   }
 
   Process {

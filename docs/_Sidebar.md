@@ -2,6 +2,7 @@
 
 - [Home](Home)
 - [Installation](Installation)
+- [Screenshots](Screenshots)
 
 **Spaces**
 - [Creating a space](Creating-a-space)

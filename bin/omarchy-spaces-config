@@ -713,6 +713,23 @@ class Window(Adw.ApplicationWindow):
         return spaces[idx]
 
 
+    def show_page(self, page):
+        """Select a sidebar entry by name, or a space by index."""
+        page = str(page).strip().lower()
+        if page in PAGES:
+            row = self.general_list.get_row_at_index(PAGES.index(page))
+            if row:
+                self.general_list.select_row(row)
+            return
+        try:
+            index = int(page)
+        except ValueError:
+            return
+        row = self.space_list.get_row_at_index(index)
+        if row:
+            self.general_list.unselect_all()
+            self.space_list.select_row(row)
+
     def inherited_for(self, space_id):
         """Which top-level keys this space takes from the defaults block."""
         defaults = self.cfg.get("defaults")
@@ -1581,9 +1598,10 @@ class Window(Adw.ApplicationWindow):
 
 
 class App(Adw.Application):
-    def __init__(self):
+    def __init__(self, start_page=None):
         super().__init__(application_id="org.omarchy.Spaces",
                          flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.start_page = start_page
 
     def do_activate(self):
         if not hasattr(self, "theme"):
@@ -1591,7 +1609,36 @@ class App(Adw.Application):
             self.theme.watch()
         win = self.props.active_window or Window(self)
         win.present()
+        if self.start_page:
+            # After present, and on an idle callback: GTK selects the first
+            # focusable row when the window is mapped, which would override a
+            # selection made before that.
+            GLib.idle_add(lambda: (win.show_page(self.start_page), False)[1])
+
+
+PAGES = ("general", "defaults", "keybinds")
+
+USAGE = """omarchy-spaces-config, configure Omarchy Spaces
+
+  --page <general|defaults|keybinds|N>
+        Open on a particular page. N is a zero-based index into the space list.
+        Used for documentation screenshots and for launchers that want to land
+        somewhere specific.
+"""
+
+
+def main(argv):
+    if "-h" in argv or "--help" in argv:
+        print(USAGE)
+        return 0
+    page = None
+    if "--page" in argv:
+        i = argv.index("--page")
+        if i + 1 < len(argv):
+            page = argv[i + 1]
+            del argv[i:i + 2]
+    return App(page).run(argv)
 
 
 if __name__ == "__main__":
-    sys.exit(App().run(sys.argv))
+    sys.exit(main(sys.argv))

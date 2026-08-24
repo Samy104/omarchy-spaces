@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "activeSpace": "home",
+  "fallbackSpace": "home",
+  "criticalBypass": true,
+  "defaults": {
+    "browser": { "command": "brave" },
+    "workspaces": { "count": 10 },
+    "apps": [
+      { "name": "Music", "class": "music", "shared": true }
+    ],
+    "notifications": {
+      "allowUnassigned": true,
+      "schedule": [
+        { "from": "22:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Night, silent" }
+      ]
+    }
+  },
+  "keybinds": {
+    "workspaceNext": "SUPER + CTRL + RIGHT",
+    "workspacePrev": "SUPER + CTRL + LEFT",
+    "moveWindowNext": "SUPER + CTRL + SHIFT + RIGHT",
+    "moveWindowPrev": "SUPER + CTRL + SHIFT + LEFT",
+    "picker": "SUPER + ALT + O",
+    "next": "SUPER + ALT + N",
+    "prev": "SUPER + ALT + SHIFT + N",
+    "status": "SUPER + ALT + I",
+    "workspacePrefix": "SUPER",
+    "moveWindowPrefix": "SUPER + SHIFT"
+  },
+  "spaces": [
+    {
+      "id": "home",
+      "name": "Home",
+      "icon": "󰃜",
+      "color": "#7aa2f7",
+      "browser": { "command": "brave", "profile": "Default" },
+      "email": "you@example.com",
+      "assistants": { "claude": "personal", "codex": "personal" },
+      "apps": [
+        "Signal",
+        "Spotify",
+        { "name": "Steam", "class": "steam", "slot": 4 }
+      ],
+      "keybind": "SUPER + ALT + H",
+      "sendKeybind": "SUPER + ALT + SHIFT + H",
+      "notifications": {
+        "allowFrom": ["home", "acme"],
+        "allowUnassigned": true,
+        "schedule": [
+          { "from": "08:00", "to": "17:00", "allowFrom": ["home", "acme"], "label": "Work hours, everything" },
+          { "from": "17:00", "to": "22:00", "allowFrom": ["home"], "label": "Evening, home only" },
+          { "from": "22:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Night, silent" }
+        ]
+      }
+    },
+    {
+      "id": "acme",
+      "name": "Acme Corp",
+      "icon": "󰌛",
+      "color": "#9ece6a",
+      "browser": { "command": "brave", "profile": "Profile 1" },
+      "email": "you@acme.test",
+      "assistants": { "claude": "work", "codex": "work" },
+      "apps": [
+        "Slack",
+        "Zoom",
+        { "name": "Thunderbird", "windowRule": false }
+      ],
+      "keybind": "SUPER + ALT + A",
+      "sendKeybind": "SUPER + ALT + SHIFT + A",
+      "notifications": {
+        "allowFrom": ["acme"],
+        "allowUnassigned": false,
+        "schedule": [
+          { "from": "08:00", "to": "18:00", "allowFrom": ["acme"], "label": "Work hours" },
+          { "from": "18:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Off hours, silent" }
+        ]
+      }
+    }
+  ]
+}

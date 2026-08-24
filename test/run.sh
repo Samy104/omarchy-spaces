@@ -8,6 +8,8 @@ echo "parity"
 ./test/parity.sh
 echo "embedded config"
 python3 test/embedded.test.py
+echo "keybind tables"
+python3 test/keybind_parity.test.py
 echo "relative navigation"
 python3 test/relative.test.py | tail -2
 echo "cli smoke"

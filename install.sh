@@ -29,6 +29,22 @@ if python3 -c "import gi; gi.require_version('Adw','1')" 2>/dev/null; then
   install -m 0755 "$REPO_DIR/bin/omarchy-spaces-config" "$BIN_DIR/omarchy-spaces-config"
   mkdir -p "$APP_DIR"
   install -m 0644 "$REPO_DIR/share/omarchy-spaces-config.desktop" "$APP_DIR/"
+
+  # Icon theme sizes rather than one file: a launcher picking 48px should not
+  # have to downscale a 512px image every time it draws the grid.
+  ICON_SRC="$REPO_DIR/assets/icon.png"
+  if [ -f "$ICON_SRC" ]; then
+    for size in 512 256 128 64 48 32; do
+      dir="$HOME/.local/share/icons/hicolor/${size}x${size}/apps"
+      mkdir -p "$dir"
+      if command -v magick >/dev/null 2>&1; then
+        magick "$ICON_SRC" -resize "${size}x${size}" -strip "$dir/omarchy-spaces.png"
+      else
+        install -m 0644 "$ICON_SRC" "$dir/omarchy-spaces.png"
+      fi
+    done
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+  fi
   update-desktop-database "$APP_DIR" 2>/dev/null || true
 else
   say "skipping the config app, install python-gobject and libadwaita for it"

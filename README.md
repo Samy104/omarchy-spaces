@@ -1,5 +1,7 @@
 # Omarchy Spaces
 
+<img src="assets/icon.png" alt="Omarchy Spaces" width="128">
+
 Context spaces for [Omarchy](https://omarchy.org). A space is a named context
 like Personal or HiScale. Each one owns a browser profile, an email address,
 assistant accounts, and a notification policy. Switching spaces re-points all
@@ -192,7 +194,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.7.2, running on Omarchy 4.0.0 with no QML warnings.
+Version 0.8.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is

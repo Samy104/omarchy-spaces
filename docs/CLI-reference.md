@@ -24,7 +24,43 @@ omarchy-spaces appearance show          pinned look vs the live one
 omarchy-spaces appearance capture       save the current theme, font, background
 omarchy-spaces appearance apply         re-apply the pinned look
 omarchy-spaces appearance clear         stop pinning a look
+
+omarchy-spaces discover browsers        installed browsers
+omarchy-spaces discover profiles <cmd>  that browser's profiles
+omarchy-spaces discover apps            app names this machine knows about
+omarchy-spaces discover themes          omarchy theme list
+omarchy-spaces discover fonts           omarchy font list
+omarchy-spaces discover backgrounds     the current theme's backgrounds
 ```
+
+## discover
+
+Every `discover` subcommand prints JSON. The configuration app uses them to
+fill its dropdowns instead of asking you to type a browser name or a theme, and
+they are on the CLI so scripts get the same lists.
+
+```bash
+omarchy-spaces discover browsers
+omarchy-spaces discover profiles brave
+```
+
+```json
+[ { "command": "brave", "name": "Brave", "desktop": "brave-browser.desktop", "chromium": true } ]
+[ { "directory": "Default", "name": "Samy Perso", "email": "", "active_time": 1787536682 } ]
+```
+
+`browsers` groups several desktop files that run the same executable and picks
+the most canonical name, so a per-profile launcher does not end up labelling
+the browser itself.
+
+`profiles` returns nothing for a browser that is not Chromium-family, since
+`--profile-directory` is a Chromium flag. It also skips entries whose directory
+is missing from disk, which happens after a profile is deleted or a launcher
+passes a malformed profile name.
+
+`apps` labels each name by where it came from. Names seen in notification
+history rank first, because that is literally the string the matching compares
+against.
 
 ## get
 

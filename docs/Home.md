@@ -1,5 +1,7 @@
 # Omarchy Spaces
 
+<img src="https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/assets/icon.png" alt="Omarchy Spaces" width="128">
+
 Context spaces for [Omarchy](https://omarchy.org). A space is a named context
 like Personal or Work. Each one owns a browser profile, an email address,
 assistant accounts, and a notification policy. Switching spaces re-points all
@@ -62,6 +64,24 @@ Configuration lives at `~/.config/omarchy-spaces/spaces.json`. You edit this.
 Active state lives at `~/.local/state/omarchy-spaces/active`. The system writes
 this, you do not. Keeping them apart means your rules survive a switch and a
 switch survives a config edit.
+
+## Top level settings
+
+Everything outside the `spaces` array. All are optional.
+
+| Key | Meaning |
+|---|---|
+| `fallbackSpace` | The [default space](Default-space), owns apps no space lists |
+| `activeSpace` | Startup space, active on a fresh machine before any switch |
+| `defaults` | Values every space [inherits](Defaults-and-inheritance) |
+| `keybinds` | Global [bindings](Keybinds) |
+| `workspaceIsolation` | Set false to leave Hyprland workspaces alone on switch |
+| `applyAppearance` | Set false to keep pinned looks but stop applying them |
+| `criticalBypass` | Set false to filter critical notifications like any other |
+| `switchNotification` | Set false to stop the toast naming the space you moved to |
+| `fallbackPlacesWindows` | Set true to open unlisted apps in the default space |
+
+The General page in the configuration app covers all of these.
 
 ## Requirements
 

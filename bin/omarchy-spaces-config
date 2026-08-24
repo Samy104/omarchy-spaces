@@ -23,6 +23,10 @@ CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config
 CONFIG_PATH = os.path.join(CONFIG_HOME, "omarchy-spaces", "spaces.json")
 
 DEFAULT_KEYBINDS = {
+    "workspaceNext": "SUPER + CTRL + RIGHT",
+    "workspacePrev": "SUPER + CTRL + LEFT",
+    "moveWindowNext": "SUPER + CTRL + SHIFT + RIGHT",
+    "moveWindowPrev": "SUPER + CTRL + SHIFT + LEFT",
     "picker": "SUPER + ALT + O",
     "next": "SUPER + ALT + N",
     "prev": "SUPER + ALT + SHIFT + N",
@@ -925,6 +929,10 @@ class Window(Adw.ApplicationWindow):
 
     KEYBIND_FIELDS = [
         ("picker", "Open the Spaces picker", "omarchy menu summon spaces"),
+        ("workspaceNext", "Next workspace in this space", "Wraps inside the space's range"),
+        ("workspacePrev", "Previous workspace in this space", "Wraps inside the space's range"),
+        ("moveWindowNext", "Move window to the next workspace", ""),
+        ("moveWindowPrev", "Move window to the previous workspace", ""),
         ("next", "Next space", ""),
         ("prev", "Previous space", ""),
         ("status", "Show the current policy", ""),

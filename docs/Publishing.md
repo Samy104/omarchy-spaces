@@ -22,6 +22,9 @@ official [develop](https://omarchyplugins.com/develop.html) and
 | README with install, usage, config, removal, dependencies | yes |
 | Public repo, LICENSE, preview image | yes |
 | No `omarchy.clonedFrom` key | verified |
+| Public repo, LICENSE, preview image | yes |
+| Icon shipped at six theme sizes | `assets/icon.png` |
+| GitHub topics | omarchy, omarchy-plugin, omarchy-shell |
 
 ## Why there are two plugin folders
 
@@ -85,7 +88,28 @@ it shows up under those topics as well.
 ```bash
 ./test/run.sh
 omarchy plugin validate ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces
+omarchy plugin validate ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces-workspaces
 /usr/lib/qt6/bin/qmllint -I /usr/share/omarchy/shell *.qml workspaces/*.qml
+omarchy plugin list --json | grep samy104
+./scripts/publish-wiki.sh
 ```
 
 Bump `version` in both manifests and in the README status line together.
+
+## Documentation coverage
+
+Every CLI command, subcommand, and config key is checked against the docs
+before release. The check is mechanical rather than a read-through, since a
+reader skims and a script does not:
+
+```bash
+python3 - <<'CHECK'
+import re, glob
+cli = open("bin/omarchy-spaces").read()
+docs = "".join(open(f).read() for f in glob.glob("docs/*.md")) + open("README.md").read()
+cmds = set(re.findall(r'"([a-z-]+)":', re.search(r'COMMANDS = \{(.*?)\n\}', cli, re.S).group(1)))
+print("undocumented:", sorted(c for c in cmds if c not in docs) or "none")
+CHECK
+```
+
+It has caught two real gaps: the `discover` family and `switchNotification`.

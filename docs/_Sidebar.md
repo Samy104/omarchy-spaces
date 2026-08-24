@@ -9,6 +9,7 @@
 - [Defaults and inheritance](Defaults-and-inheritance)
 
 **Behaviour**
+- [Apps and segmentation](Apps-and-segmentation)
 - [How notifications are routed](How-notifications-are-routed)
 - [Workspaces and windows](Workspaces-and-windows)
 - [Appearance](Appearance)

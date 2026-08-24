@@ -10,12 +10,13 @@ cfg = json.load(open(os.path.join(here, "..", "config", "spaces.example.json")))
 # Exercise inheritance: move shared settings up into defaults and delete them
 # from one space, so the parity check covers the merged path rather than only
 # fully explicit spaces.
-cfg["defaults"] = {"notifications": {"allowUnassigned": False},
+cfg["defaults"] = {"apps": [{"name": "SharedPlayer", "shared": True}],
+                   "notifications": {"allowUnassigned": False},
                    "workspaces": {"count": 10},
                    "browser": {"command": "brave"},
                    "apps": ["SharedApp"]}
 del cfg["spaces"][1]["browser"]["command"]
-apps = ["Signal", "Slack", "Ghost", "spotify", "SLACK.desktop", "SharedApp", ""]
+apps = ["Signal", "Slack", "Ghost", "spotify", "SLACK.desktop", "SharedApp", "SharedPlayer", ""]
 out = []
 for sid in cli.space_ids(cfg):
     for m in range(1440):
@@ -25,8 +26,11 @@ for sid in cli.space_ids(cfg):
                (cli.resolve_space(cfg, sid) or {}).get("browser", {}).get("command", "")]
         for a in apps:
             owner = cli.space_for_app(cfg, a)
-            allowed = (bool(pol["allowUnassigned"]) if owner is None
-                       else owner in pol["allowFrom"])
+            if cli.is_shared_app(cfg, a):
+                allowed = True
+            else:
+                allowed = (bool(pol["allowUnassigned"]) if owner is None
+                           else owner in pol["allowFrom"])
             row.append([a, owner, allowed])
         out.append(row)
 print(json.dumps(out, separators=(",", ":")))

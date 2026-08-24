@@ -265,16 +265,88 @@ def normalize_app_key(name):
     return s
 
 
+def app_entry(raw):
+    """Normalise one `apps` entry.
+
+    Either a bare string, or an object. The string form covers the common case
+    where the notification name and the window class are the same text.
+
+        "Signal"
+        {"name": "Steam", "class": "steam", "slot": 2}
+
+    `name` matches the app_name a notification carries. `class` matches the
+    Hyprland window class, which is often but not always the same string.
+    `slot` is which workspace of the owning space its windows open on.
+    Mirrors appEntry in SpacesLogic.js.
+    """
+    if isinstance(raw, str):
+        name = raw.strip()
+        return ({"name": name, "cls": name, "slot": 1,
+                 "windowRule": True, "shared": False} if name else None)
+    if isinstance(raw, dict):
+        name = str(raw.get("name") or raw.get("class") or "").strip()
+        if not name:
+            return None
+        try:
+            slot = int(raw.get("slot", 1))
+        except (TypeError, ValueError):
+            slot = 1
+        return {"name": name,
+                "cls": str(raw.get("class") or name).strip(),
+                "slot": slot if slot > 0 else 1,
+                "windowRule": raw.get("windowRule") is not False,
+                # A shared app belongs to no single space. Its notifications
+                # always get through and its windows are never forced anywhere,
+                # which is what a music player or a password manager wants.
+                "shared": raw.get("shared") is True}
+    return None
+
+
+def app_entries(space):
+    out = []
+    for raw in ((space or {}).get("apps") or []):
+        e = app_entry(raw)
+        if e:
+            out.append(e)
+    return out
+
+
 def space_for_app(cfg, app):
     key = normalize_app_key(app)
     if not key:
         return None
     for sid in space_ids(cfg):
-        resolved = resolve_space(cfg, sid) or {}
-        for a in normalize_list(resolved.get("apps")):
-            if normalize_app_key(a) == key:
+        for entry in app_entries(resolve_space(cfg, sid)):
+            if entry.get("shared"):
+                continue
+            if normalize_app_key(entry["name"]) == key:
                 return sid
     return None
+
+
+def shared_app_entries(cfg):
+    """Every app marked shared, from defaults and from every space.
+
+    Read from `defaults.apps` directly rather than through resolve_space,
+    because arrays replace on inherit: a space with its own apps list would
+    otherwise never see a shared entry declared in defaults, which is the one
+    place people will put a music player.
+    """
+    out = []
+    sources = []
+    if isinstance(cfg.get("defaults"), dict):
+        sources.append(cfg["defaults"])
+    sources.extend(cfg.get("spaces", []))
+    for src in sources:
+        out.extend(e for e in app_entries(src) if e.get("shared"))
+    return out
+
+
+def is_shared_app(cfg, app):
+    key = normalize_app_key(app)
+    if not key:
+        return False
+    return any(normalize_app_key(e["name"]) == key for e in shared_app_entries(cfg))
 
 
 def resolve_policy(cfg, space_id, now):
@@ -523,12 +595,34 @@ def cmd_validate(cfg, args):
     # letting someone wonder why a notification went to the wrong space.
     owners = {}
     for sid in ids:
-        for app in normalize_list((resolve_space(cfg, sid) or {}).get("apps")):
-            owners.setdefault(normalize_app_key(app), []).append(sid)
+        for entry in app_entries(resolve_space(cfg, sid)):
+            if entry.get("shared"):
+                continue
+            owners.setdefault(normalize_app_key(entry["name"]), []).append(sid)
     for app, claimers in owners.items():
         if len(claimers) > 1:
             problems.append("app '%s' is claimed by %s; %s wins"
                             % (app, " and ".join(claimers), claimers[0]))
+
+    # A browser is per space through profiles, and every profile shares one
+    # window class, so a rule on that class drags every profile's windows into
+    # one space. Worth saying rather than letting someone debug it.
+    browser_cmds = set()
+    for sid in ids:
+        cmd = ((resolve_space(cfg, sid) or {}).get("browser") or {}).get("command")
+        if cmd:
+            browser_cmds.add(normalize_app_key(os.path.basename(str(cmd))))
+    for sid in ids:
+        for entry in app_entries(resolve_space(cfg, sid)):
+            if not entry.get("windowRule", True):
+                continue
+            cls = normalize_app_key(entry["cls"])
+            if cls in browser_cmds or cls.replace("-browser", "") in browser_cmds:
+                problems.append(
+                    "%s: '%s' is a browser used by a space; a window rule on it would "
+                    "pull every profile into %s. Set \"windowRule\": false on that entry "
+                    "to keep notification routing without the placement."
+                    % (sid, entry["cls"], sid))
 
     # Overlapping workspace ranges would put two spaces' windows in the same
     # place, which defeats the isolation entirely.
@@ -1319,8 +1413,69 @@ def keybind_block(cfg):
             lines.append('    "omarchy-spaces move-to-workspace " .. i)')
         lines.append("end")
 
+    rules = window_rule_lines(cfg)
+    if rules:
+        lines.append("")
+        lines.extend(rules)
+
     lines.append(BIND_END)
     return "\n".join(lines)
+
+
+def window_rule_lines(cfg):
+    """Hyprland rules that park an app's windows in its owning space.
+
+    This is what makes `apps` mean more than notification routing. Steam listed
+    under personal opens on a personal workspace even if you launch it while
+    work is active, so the segmentation holds without anything watching events
+    at runtime.
+
+    Rules are static config rather than a daemon reacting to window-open events.
+    Hyprland places the window correctly the first time, so there is no visible
+    jump, and nothing to keep running.
+    """
+    if not isolation_on(cfg):
+        return []
+    out = ["-- Park each app's windows in the space that owns it. Generated from the",
+           "-- `apps` list of every space, so listing Steam under personal is enough.",
+           "-- The `silent` suffix places the window without pulling you to it."]
+    seen = set()
+    for sid in space_ids(cfg):
+        resolved = resolve_space(cfg, sid)
+        offset = ws_offset(cfg, sid)
+        count = ws_count(cfg, sid)
+        for entry in app_entries(resolved):
+            cls = entry["cls"]
+            if (not cls or cls in seen or not entry.get("windowRule", True)
+                    or entry.get("shared")):
+                continue
+            seen.add(cls)
+            slot = min(max(entry["slot"], 1), count)
+            out.append('o.window(%s, { workspace = %s })'
+                       % (lua_quote("^(" + cls + ")$"), lua_quote("%d silent" % (offset + slot))))
+    return out if len(out) > 3 else []
+
+
+def cmd_windowrules(cfg, args):
+    sub = args[0] if args else "print"
+    if sub == "print":
+        lines = window_rule_lines(cfg)
+        print("\n".join(lines) if lines else "no rules, no apps are listed")
+        return 0
+    if sub == "show":
+        for sid in space_ids(cfg):
+            resolved = resolve_space(cfg, sid)
+            offset = ws_offset(cfg, sid)
+            entries = app_entries(resolved)
+            print("%s (real workspaces %d-%d)"
+                  % (sid, offset + 1, offset + ws_count(cfg, sid)))
+            if not entries:
+                print("      no apps listed")
+            for e in entries:
+                print("      %-24s class=%-24s -> slot %d (real %d)"
+                      % (e["name"], e["cls"], e["slot"], offset + e["slot"]))
+        return 0
+    die("usage: omarchy-spaces windowrules [print|show]")
 
 
 def strip_block(text):
@@ -1601,6 +1756,8 @@ Keybinds
   keybinds remove         take the managed block back out
   keybinds conflicts      check them against what Hyprland already has
   keybinds print          print the Lua block without writing it
+  windowrules show        which app lands in which space and slot
+  windowrules print       the generated Hyprland rules
 """
 
 
@@ -1613,6 +1770,7 @@ COMMANDS = {
     "move-to-space": cmd_move_to_space, "windows": cmd_windows,
     "appearance": cmd_appearance, "discover": cmd_discover,
     "export": cmd_export, "import": cmd_import, "keybinds": cmd_keybinds,
+    "windowrules": cmd_windowrules,
 }
 
 

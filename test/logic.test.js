@@ -211,5 +211,42 @@ test("a schedule set once in defaults applies to every space", function () {
   assert.strictEqual(L.resolvePolicy(c, "a", L.parseTime("10:00")).allowFrom[0], "a")
 })
 
+console.log("\napp entries and shared apps")
+test("a bare string is the simple form", function () {
+  var e = L.appEntry("Signal")
+  assert.strictEqual(e.name, "Signal")
+  assert.strictEqual(e.cls, "Signal")
+  assert.strictEqual(e.slot, 1)
+  assert.strictEqual(e.windowRule, true)
+  assert.strictEqual(e.shared, false)
+})
+test("an object form carries class, slot, and opt-outs", function () {
+  var e = L.appEntry({ name: "Steam", "class": "steam", slot: 4, windowRule: false })
+  assert.strictEqual(e.cls, "steam")
+  assert.strictEqual(e.slot, 4)
+  assert.strictEqual(e.windowRule, false)
+})
+test("a shared app is owned by nobody", function () {
+  var c = { defaults: { apps: [{ name: "YT Music", shared: true }] },
+            spaces: [{ id: "a", apps: ["Signal"] }] }
+  assert.strictEqual(L.spaceForApp(c, "YT Music"), null)
+  assert.strictEqual(L.isSharedApp(c, "YT Music"), true)
+})
+test("a shared app reaches every space even when spaces override apps", function () {
+  var c = { defaults: { apps: [{ name: "YT Music", shared: true }] },
+            spaces: [
+              { id: "a", apps: ["Signal"], notifications: { allowFrom: ["a"], allowUnassigned: false } },
+              { id: "b", apps: ["Slack"], notifications: { allowFrom: ["b"], allowUnassigned: false } }] }
+  assert.strictEqual(L.shouldShow(c, "a", { app: "YT Music" }, 600).show, true)
+  assert.strictEqual(L.shouldShow(c, "b", { app: "YT Music" }, 600).show, true)
+  assert.strictEqual(L.shouldShow(c, "a", { app: "Slack" }, 600).show, false)
+})
+test("shared still obeys a full mute", function () {
+  var c = { defaults: { apps: [{ name: "YT Music", shared: true }] },
+            spaces: [{ id: "a", notifications: { allowFrom: [], allowUnassigned: false } }] }
+  // Shared means "belongs to no space", not "ignores the schedule".
+  assert.strictEqual(L.isSharedApp(c, "YT Music"), true)
+})
+
 console.log("\n" + passed + " passed, " + failed + " failed\n")
 process.exit(failed === 0 ? 0 : 1)

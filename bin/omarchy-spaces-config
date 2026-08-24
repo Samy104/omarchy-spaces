@@ -43,6 +43,15 @@ def run_cli(*args):
 
 
 
+def run_cli_raw(program, *args):
+    """Run any command and return (code, output). Used for `omarchy ...`."""
+    try:
+        p = subprocess.run([program, *args], capture_output=True, text=True, timeout=15)
+        return p.returncode, (p.stdout + p.stderr).strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, str(e)
+
+
 def cli_json(*args):
     """Run a CLI subcommand that prints JSON and parse it."""
     code, out = run_cli(*args)
@@ -256,8 +265,9 @@ class Window(Adw.ApplicationWindow):
         self.page.add(self.g_accounts)
 
         self.g_apps = Adw.PreferencesGroup(
-            title="Apps owned by this space",
-            description="Their notifications count as belonging to this space.")
+            title="Apps in this space",
+            description="An app belongs to one space. Its notifications are routed here, "
+                        "and its windows open on this space's workspaces.")
         add_app = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER,
                              tooltip_text="Add an app")
         add_app.add_css_class("flat")
@@ -563,11 +573,13 @@ class Window(Adw.ApplicationWindow):
             # Same widgets serve a space and the defaults block, so the copy
             # has to stop claiming to be about "this space" on the Defaults page.
             defaults_mode = getattr(self, "editing_defaults", False)
-            self.g_apps.set_title("Apps" if defaults_mode else "Apps owned by this space")
+            self.g_apps.set_title("Apps in every space" if defaults_mode else "Apps in this space")
             self.g_apps.set_description(
-                "Owned by any space that does not list its own."
+                "Claimed by any space that does not list its own. An app belongs to one "
+                "space: its notifications are routed there, and its windows open there."
                 if defaults_mode else
-                "Their notifications count as belonging to this space.")
+                "An app belongs to one space. Its notifications are routed here, and its "
+                "windows open on this space's workspaces, wherever you launch it.")
             self.g_browser.set_description(
                 "Used by any space that does not set its own."
                 if defaults_mode else
@@ -1090,19 +1102,104 @@ class Window(Adw.ApplicationWindow):
             self.g_apps.add(row)
             self.app_rows.append(row)
             return
-        for name in self.apps:
-            row = Adw.ActionRow(title=name)
+        for index, raw in enumerate(self.apps):
+            entry = self.app_entry(raw)
+            if entry["shared"]:
+                detail = "shared, reaches every space"
+            elif entry["windowRule"]:
+                detail = "opens on slot %d" % entry["slot"]
+                if entry["cls"] != entry["name"]:
+                    detail += ", window class %s" % entry["cls"]
+            else:
+                detail = "notifications only, windows left where they open"
+            row = Adw.ActionRow(title=entry["name"], subtitle=detail)
+            row.set_activatable(True)
+            row.connect("activated", lambda _r, i=index: self.edit_app(i))
             btn = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
             btn.add_css_class("flat")
-            btn.connect("clicked", lambda _b, n=name: self.remove_app(n))
+            btn.connect("clicked", lambda _b, i=index: self.remove_app_at(i))
             row.add_suffix(btn)
             self.g_apps.add(row)
             self.app_rows.append(row)
 
-    def remove_app(self, name):
-        self.apps = [a for a in self.apps if a != name]
+    @staticmethod
+    def app_entry(raw):
+        """Mirror of app_entry in the CLI, for display."""
+        if isinstance(raw, str):
+            return {"name": raw, "cls": raw, "slot": 1, "windowRule": True, "shared": False}
+        name = str(raw.get("name") or raw.get("class") or "")
+        try:
+            slot = int(raw.get("slot", 1))
+        except (TypeError, ValueError):
+            slot = 1
+        return {"name": name,
+                "cls": str(raw.get("class") or name),
+                "slot": slot if slot > 0 else 1,
+                "windowRule": raw.get("windowRule") is not False,
+                "shared": raw.get("shared") is True}
+
+    def remove_app_at(self, index):
+        if 0 <= index < len(self.apps):
+            del self.apps[index]
         self.set_apps(self.apps)
         self.on_field_changed()
+
+    def edit_app(self, index):
+        """Which slot an app opens on, and whether it is placed at all.
+
+        A browser is the case that needs the opt-out: every profile shares one
+        window class, so a placement rule would drag them all into one space.
+        """
+        if not (0 <= index < len(self.apps)):
+            return
+        entry = self.app_entry(self.apps[index])
+
+        dialog = Adw.MessageDialog(transient_for=self, heading=entry["name"],
+                                   body="How this app is treated in this space.")
+        group = Adw.PreferencesGroup()
+        r_class = Adw.EntryRow(title="Window class")
+        r_class.set_text(entry["cls"])
+        r_slot = Adw.SpinRow.new_with_range(1, 20, 1)
+        r_slot.set_title("Opens on slot")
+        r_slot.set_value(entry["slot"])
+        r_place = Adw.SwitchRow(
+            title="Place its windows",
+            subtitle="Turn off for a browser, whose profiles share one class")
+        r_place.set_active(entry["windowRule"])
+        r_shared = Adw.SwitchRow(
+            title="Shared across spaces",
+            subtitle="Belongs to no space. Its notifications always reach you and "
+                     "its windows are never moved. Use it for a music player.")
+        r_shared.set_active(entry["shared"])
+        for r in (r_class, r_slot, r_place, r_shared):
+            group.add(r)
+        dialog.set_extra_child(group)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Save")
+        dialog.set_default_response("save")
+
+        def answered(_d, response):
+            if response != "save":
+                return
+            new_entry = {"name": entry["name"]}
+            cls = r_class.get_text().strip()
+            if cls and cls != entry["name"]:
+                new_entry["class"] = cls
+            slot = int(r_slot.get_value())
+            if slot != 1:
+                new_entry["slot"] = slot
+            if not r_place.get_active():
+                new_entry["windowRule"] = False
+            if r_shared.get_active():
+                new_entry["shared"] = True
+            # A plain string is the tidier form when nothing was customised.
+            self.apps[index] = (new_entry["name"] if list(new_entry) == ["name"]
+                                else new_entry)
+            self.set_apps(self.apps)
+            self.on_field_changed()
+
+        dialog.connect("response", answered)
+        dialog.present()
 
     def on_add_app(self, _b):
         """Searchable picker over apps this machine actually knows about.
@@ -1111,7 +1208,7 @@ class Window(Adw.ApplicationWindow):
         what the app announced itself as, which is what the matching uses.
         """
         candidates = cli_json("discover", "apps")
-        taken = {a.lower() for a in self.apps}
+        taken = {self.app_entry(a)["name"].lower() for a in self.apps}
         candidates = [c for c in candidates if c["name"].lower() not in taken]
 
         win = Adw.Window(transient_for=self, modal=True, title="Add an app",
@@ -1128,7 +1225,7 @@ class Window(Adw.ApplicationWindow):
                         "desktop": "installed"}
 
         def choose(name):
-            if name and name.lower() not in {a.lower() for a in self.apps}:
+            if name and name.lower() not in {self.app_entry(a)["name"].lower() for a in self.apps}:
                 self.apps.append(name)
                 self.set_apps(self.apps)
                 self.on_field_changed()
@@ -1217,10 +1314,40 @@ class Window(Adw.ApplicationWindow):
         Only meaningful for the space that is currently active, since the theme
         on screen belongs to it.
         """
-        code, active = run_cli("current")
         space = self.current_space()
         if space is None:
             return
+
+        # The CLI's capture writes into the active space. On the Defaults page
+        # there is no active space to write to, so read the current look here
+        # rather than refusing with a confusing message about switching.
+        if getattr(self, "editing_defaults", False):
+            look = {}
+            for key, sub in (("theme", "theme"), ("font", "font")):
+                code, out = run_cli_raw("omarchy", sub, "current")
+                if code == 0 and out:
+                    look[key] = out.splitlines()[0].strip()
+            state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+            link = os.path.join(state, "omarchy", "current", "background")
+            bgdir = os.path.join(state, "omarchy", "current", "theme", "backgrounds")
+            try:
+                real = os.path.realpath(link)
+                if os.path.exists(real):
+                    look["background"] = (os.path.basename(real)
+                                          if os.path.dirname(real) == bgdir else real)
+            except OSError:
+                pass
+            if not look:
+                self.notify("Could not read the current theme")
+                return
+            self.collect()
+            space["appearance"] = look
+            self.load_selected()
+            self.dirty = True
+            self.notify("Captured into Defaults: " + ", ".join(look))
+            return
+
+        code, active = run_cli("current")
         if code == 0 and active.strip() != str(space.get("id")):
             self.notify("Switch to this space first, the look on screen belongs to "
                         + active.strip())

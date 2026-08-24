@@ -125,15 +125,90 @@ function normalizeAppKey(name) {
   return s
 }
 
+
+// An `apps` entry is either a bare string or an object. The string form covers
+// the common case where the notification name and the window class match.
+//
+//   "Signal"
+//   { "name": "Steam", "class": "steam", "slot": 2 }
+//
+// `name` matches the app_name a notification carries. `class` matches the
+// Hyprland window class, which is often but not always the same string.
+// `slot` is which workspace of the owning space its windows open on.
+function appEntry(raw) {
+  if (typeof raw === "string") {
+    var name = raw.trim()
+    return name ? { name: name, cls: name, slot: 1, windowRule: true, shared: false } : null
+  }
+  if (raw && typeof raw === "object") {
+    var n = String(raw.name || raw.class || "").trim()
+    if (!n) return null
+    var slot = parseInt(raw.slot, 10)
+    return {
+      name: n,
+      cls: String(raw["class"] || n).trim(),
+      slot: isFinite(slot) && slot > 0 ? slot : 1,
+      windowRule: raw.windowRule !== false,
+      // A shared app belongs to no single space. Its notifications always get
+      // through and its windows are never forced anywhere, which is what a
+      // music player or a password manager actually wants.
+      shared: raw.shared === true
+    }
+  }
+  return null
+}
+
+function appEntries(space) {
+  var list = (space && Array.isArray(space.apps)) ? space.apps : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var e = appEntry(list[i])
+    if (e) out.push(e)
+  }
+  return out
+}
+
+
+// Every app marked shared, from the defaults block and from every space.
+//
+// Read from `defaults.apps` directly rather than through resolveSpace, because
+// arrays replace on inherit: a space with its own apps list would otherwise
+// never see a shared entry declared in defaults, which is the one place people
+// will put a music player.
+function sharedAppEntries(config) {
+  var out = []
+  var lists = []
+  if (config && isPlainObject(config.defaults)) lists.push(config.defaults)
+  var spaces = (config && Array.isArray(config.spaces)) ? config.spaces : []
+  for (var i = 0; i < spaces.length; i++) lists.push(spaces[i])
+  for (var l = 0; l < lists.length; l++) {
+    var entries = appEntries(lists[l])
+    for (var j = 0; j < entries.length; j++) {
+      if (entries[j].shared) out.push(entries[j])
+    }
+  }
+  return out
+}
+
+function isSharedApp(config, appName) {
+  var key = normalizeAppKey(appName)
+  if (!key) return false
+  var shared = sharedAppEntries(config)
+  for (var i = 0; i < shared.length; i++) {
+    if (normalizeAppKey(shared[i].name) === key) return true
+  }
+  return false
+}
+
 function spaceForApp(config, appName) {
   var key = normalizeAppKey(appName)
   if (!key) return null
   var ids = spaceIds(config)
   for (var i = 0; i < ids.length; i++) {
-    var resolved = resolveSpace(config, ids[i])
-    var apps = normalizeList(resolved && resolved.apps)
-    for (var j = 0; j < apps.length; j++) {
-      if (normalizeAppKey(apps[j]) === key) return String(ids[i])
+    var entries = appEntries(resolveSpace(config, ids[i]))
+    for (var j = 0; j < entries.length; j++) {
+      if (entries[j].shared) continue
+      if (normalizeAppKey(entries[j].name) === key) return String(ids[i])
     }
   }
   return null
@@ -193,6 +268,10 @@ function shouldShow(config, activeSpaceId, notification, nowMinutes, options) {
   if (criticalBypass && opts.criticalUrgency !== undefined
       && notification && notification.urgency === opts.criticalUrgency) {
     return { show: true, reason: "critical-bypass", policy: policy, owner: null }
+  }
+
+  if (isSharedApp(config, app)) {
+    return { show: true, reason: "shared-app", policy: policy, owner: null }
   }
 
   var owner = spaceForApp(config, app)
@@ -287,7 +366,11 @@ var api = {
   slotForReal: slotForReal,
   deepMerge: deepMerge,
   resolveSpace: resolveSpace,
-  inheritedKeys: inheritedKeys
+  inheritedKeys: inheritedKeys,
+  appEntry: appEntry,
+  appEntries: appEntries,
+  isSharedApp: isSharedApp,
+  sharedAppEntries: sharedAppEntries
 }
 
 if (typeof module !== "undefined" && module.exports) module.exports = api

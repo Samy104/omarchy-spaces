@@ -473,6 +473,17 @@ class Window(Adw.ApplicationWindow):
             self.g_look.add(r)
         self.page.add(self.g_look)
 
+        self.g_startup = Adw.PreferencesGroup(
+            title="Startup",
+            description="What each workspace opens. Arrange a workspace how you like, "
+                        "then capture it.")
+        cap = Gtk.Button(label="Capture this workspace", valign=Gtk.Align.CENTER)
+        cap.add_css_class("flat")
+        cap.connect("clicked", self.on_capture_startup)
+        self.g_startup.set_header_suffix(cap)
+        self.page.add(self.g_startup)
+        self.startup_rows = []
+
         self.g_notif = Adw.PreferencesGroup(
             title="Notifications",
             description="Baseline rules. Schedule windows below override these by time of day.")
@@ -810,6 +821,8 @@ class Window(Adw.ApplicationWindow):
             fill_combo(self.r_font, cli_json("discover", "fonts"), str(look.get("font", "")))
             fill_combo(self.r_bg, cli_json("discover", "backgrounds"), str(look.get("background", "")))
 
+            self.load_startup(space)
+
             notif = space.get("notifications") or {}
             fb = str(self.cfg.get("fallbackSpace", ""))
             self.r_unassigned.set_active(notif.get("allowUnassigned") is not False)
@@ -977,6 +990,8 @@ class Window(Adw.ApplicationWindow):
             space["appearance"] = look
         else:
             space.pop("appearance", None)
+
+        self.collect_startup(space)
 
         notif = space.get("notifications") or {}
         notif["allowFrom"] = [s for s, sw in self.allow_switches.items() if sw.get_active()]
@@ -1274,6 +1289,221 @@ class Window(Adw.ApplicationWindow):
                                   body=out or "No output")
             d.add_response("ok", "Close")
             d.present()
+
+
+    # --- startup layouts ----------------------------------------------------
+
+    def load_startup(self, space):
+        for row in self.startup_rows:
+            self.g_startup.remove(row)
+        self.startup_rows = []
+        self.startup = space.get("startup") or {}
+        slots = list(self.startup.get("slots") or [])
+        slots.sort(key=lambda x: int(x.get("slot", 0)))
+        self.startup["slots"] = slots
+
+        toggle = Adw.SwitchRow(
+            title="Layout enabled",
+            subtitle="Turn off to keep the layout without replaying it")
+        toggle.set_active(self.startup.get("enabled") is not False)
+        toggle.connect("notify::active", self.on_field_changed)
+        self.g_startup.add(toggle)
+        self.startup_rows.append(toggle)
+        self.startup_enabled_row = toggle
+
+        login = Adw.SwitchRow(
+            title="Open automatically at login",
+            subtitle="Replays this layout when Hyprland starts, if this space is "
+                     "the active one. Needs Keybinds, Apply to take effect.")
+        login.set_active(self.startup.get("runOnLogin") is True)
+        login.connect("notify::active", self.on_field_changed)
+        self.g_startup.add(login)
+        self.startup_rows.append(login)
+        self.startup_login_row = login
+
+        if not slots:
+            empty = Adw.ActionRow(
+                title="Nothing recorded",
+                subtitle="Go to a workspace in this space, open what you want, "
+                         "then use Capture this workspace")
+            empty.set_sensitive(False)
+            self.g_startup.add(empty)
+            self.startup_rows.append(empty)
+            return
+
+        for index, sl in enumerate(slots):
+            self.g_startup.add(self.startup_slot_row(index, sl, len(slots)))
+
+    def startup_slot_row(self, index, sl, total):
+        slot_no = int(sl.get("slot", 0))
+        entries = sl.get("entries") or []
+        live = sum(1 for e in entries if e.get("command"))
+        layout = str(sl.get("layout", "split"))
+
+        row = Adw.ExpanderRow(
+            title="Workspace %d" % slot_no,
+            subtitle="%s, %d of %d ready" % (
+                "side by side" if layout == "split" else "stacked, alternate with SUPER+ALT+TAB",
+                live, len(entries)))
+
+        on = Gtk.Switch(valign=Gtk.Align.CENTER, active=sl.get("enabled") is not False)
+        on.connect("notify::active", lambda w, _p, s=sl: self.set_startup_flag(s, w))
+        row.add_suffix(on)
+
+        up = Gtk.Button(icon_name="go-up-symbolic", valign=Gtk.Align.CENTER)
+        up.add_css_class("flat")
+        up.set_sensitive(index > 0)
+        up.connect("clicked", lambda _b, i=index: self.move_startup_slot(i, -1))
+        down = Gtk.Button(icon_name="go-down-symbolic", valign=Gtk.Align.CENTER)
+        down.add_css_class("flat")
+        down.set_sensitive(index < total - 1)
+        down.connect("clicked", lambda _b, i=index: self.move_startup_slot(i, 1))
+        row.add_prefix(down)
+        row.add_prefix(up)
+
+        mode = Adw.ComboRow(title="Arrangement")
+        fill_combo(mode, ["split", "stack"], layout, none_label="split")
+        mode.connect("notify::selected",
+                     lambda w, _p, s=sl: self.set_startup_layout(s, w))
+        row.add_row(mode)
+
+        for e in entries:
+            sub = e.get("command") or ("needs a command: " + (e.get("note") or "unknown"))
+            er = Adw.ActionRow(title=e.get("name") or "(unnamed)", subtitle=sub[:90])
+            er.set_activatable(True)
+            er.connect("activated", lambda _r, entry=e: self.edit_startup_entry(entry))
+            sw = Gtk.Switch(valign=Gtk.Align.CENTER,
+                            active=e.get("enabled") is not False and bool(e.get("command")))
+            sw.set_sensitive(bool(e.get("command")))
+            sw.connect("notify::active", lambda w, _p, entry=e: self.set_startup_flag(entry, w))
+            er.add_suffix(sw)
+            row.add_row(er)
+
+        run = Adw.ActionRow(title="Open this workspace now")
+        btn = Gtk.Button(label="Run", valign=Gtk.Align.CENTER)
+        btn.connect("clicked", lambda _b, n=slot_no: self.run_startup_slot(n))
+        run.add_suffix(btn)
+        row.add_row(run)
+
+        drop = Adw.ActionRow(title="Forget this workspace")
+        dbtn = Gtk.Button(label="Forget", valign=Gtk.Align.CENTER)
+        dbtn.add_css_class("destructive-action")
+        dbtn.connect("clicked", lambda _b, n=slot_no: self.forget_startup_slot(n))
+        drop.add_suffix(dbtn)
+        row.add_row(drop)
+
+        self.startup_rows.append(row)
+        return row
+
+    def set_startup_flag(self, target, switch):
+        if self.loading:
+            return
+        target["enabled"] = switch.get_active()
+        self.dirty = True
+
+    def set_startup_layout(self, sl, combo):
+        if self.loading:
+            return
+        sl["layout"] = combo_value(combo, none_label="split") or "split"
+        self.dirty = True
+        self.refresh_startup()
+
+    def move_startup_slot(self, index, step):
+        slots = self.startup.get("slots") or []
+        target = index + step
+        if not (0 <= target < len(slots)):
+            return
+        slots[index], slots[target] = slots[target], slots[index]
+        self.dirty = True
+        self.refresh_startup()
+
+    def forget_startup_slot(self, slot_no):
+        slots = self.startup.get("slots") or []
+        self.startup["slots"] = [x for x in slots if int(x.get("slot", 0)) != slot_no]
+        self.dirty = True
+        self.refresh_startup()
+
+    def refresh_startup(self):
+        space = self.current_space()
+        if space is None:
+            return
+        self.collect_startup(space)
+        save_config(self.cfg)
+        self.cfg = load_config()
+        self.load_selected()
+
+    def collect_startup(self, space):
+        if not getattr(self, "startup", None):
+            return
+        if hasattr(self, "startup_enabled_row"):
+            self.startup["enabled"] = self.startup_enabled_row.get_active()
+        if hasattr(self, "startup_login_row"):
+            if self.startup_login_row.get_active():
+                self.startup["runOnLogin"] = True
+            else:
+                self.startup.pop("runOnLogin", None)
+        if self.startup.get("slots"):
+            space["startup"] = self.startup
+        else:
+            space.pop("startup", None)
+
+    def run_startup_slot(self, slot_no):
+        space = self.current_space()
+        if space is None:
+            return
+        self.collect()
+        save_config(self.cfg)
+        code, out = run_cli("startup", "run", str(space.get("id")), str(slot_no))
+        self.notify(out.splitlines()[-1] if out else ("Opened" if code == 0 else "Failed"))
+
+    def on_capture_startup(self, _b):
+        space = self.current_space()
+        if space is None:
+            return
+        code, active = run_cli("current")
+        if code == 0 and active.strip() != str(space.get("id")):
+            self.notify("Switch to this space first, capture reads the workspace you are on")
+            return
+        self.collect()
+        save_config(self.cfg)
+        code, out = run_cli("startup", "capture")
+        self.cfg = load_config()
+        self.load_selected()
+        self.notify(out.splitlines()[0] if out else "Captured")
+
+    def edit_startup_entry(self, entry):
+        dialog = Adw.MessageDialog(transient_for=self,
+                                   heading=entry.get("name") or "Entry",
+                                   body="The command that opens this window.")
+        group = Adw.PreferencesGroup()
+        r_name = Adw.EntryRow(title="Name")
+        r_name.set_text(str(entry.get("name") or ""))
+        r_cmd = Adw.EntryRow(title="Command")
+        r_cmd.set_text(str(entry.get("command") or ""))
+        r_match = Adw.EntryRow(title="Window class")
+        r_match.set_text(str(entry.get("match") or ""))
+        r_match.set_tooltip_text("Used to skip this entry when its window is already open")
+        for r in (r_name, r_cmd, r_match):
+            group.add(r)
+        dialog.set_extra_child(group)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Save")
+        dialog.set_default_response("save")
+
+        def answered(_d, response):
+            if response != "save":
+                return
+            entry["name"] = r_name.get_text().strip()
+            entry["command"] = r_cmd.get_text().strip()
+            entry["match"] = r_match.get_text().strip()
+            if entry["command"]:
+                entry.pop("note", None)
+                entry["enabled"] = True
+            self.dirty = True
+            self.refresh_startup()
+
+        dialog.connect("response", answered)
+        dialog.present()
 
     # --- profiles, apps, transfer -------------------------------------------
 

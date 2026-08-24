@@ -10,6 +10,7 @@
 - [Defaults and inheritance](Defaults-and-inheritance)
 
 **Behaviour**
+- [Startup layouts](Startup-layouts)
 - [Apps and segmentation](Apps-and-segmentation)
 - [The default space](Default-space)
 - [How notifications are routed](How-notifications-are-routed)

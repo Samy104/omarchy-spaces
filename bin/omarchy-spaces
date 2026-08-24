@@ -17,7 +17,9 @@ one without the other fails the suite.
 import json
 import os
 import re
+import shlex
 import subprocess
+import time
 import sys
 from datetime import datetime
 
@@ -1505,6 +1507,14 @@ def keybind_block(cfg):
             lines.append('    "omarchy-spaces move-to-workspace " .. i)')
         lines.append("end")
 
+    # Replay startup layouts at login, for any space that asks for it. Off by
+    # default: opening a dozen windows on login is not something to inherit
+    # from having recorded a layout.
+    if any((startup_config(cfg, sid).get("runOnLogin") is True) for sid in space_ids(cfg)):
+        lines.append("")
+        lines.append("-- Replay the active space's startup layout when Hyprland starts.")
+        lines.append('o.exec_on_start("omarchy-spaces startup run --login")')
+
     rules = window_rule_lines(cfg)
     if rules:
         lines.append("")
@@ -1727,6 +1737,385 @@ def report_conflicts(cfg):
     return 1
 
 
+
+# --- startup layouts ---------------------------------------------------------
+#
+# A space can describe what each of its workspace slots should contain, and
+# replay that on demand or at login.
+#
+#   "startup": {
+#     "enabled": true,
+#     "slots": [
+#       { "slot": 1, "enabled": true, "layout": "split",
+#         "entries": [ { "name": "Gmail", "command": "...", "match": "...",
+#                        "enabled": true } ] }
+#     ]
+#   }
+#
+# layout is "split" (tiled side by side, Hyprland's default) or "stack" (one
+# window group, so they share the space and you alternate with SUPER+ALT+TAB).
+#
+# `match` is a window class. When a window matching it is already on the slot,
+# the entry is skipped, so running this twice does not open Gmail twice.
+
+STARTUP_LAYOUTS = ("split", "stack")
+
+
+def startup_config(cfg, space_id):
+    space = resolve_space(cfg, space_id) or {}
+    st = space.get("startup")
+    return st if isinstance(st, dict) else {}
+
+
+def startup_slots(cfg, space_id):
+    st = startup_config(cfg, space_id)
+    out = []
+    for raw in (st.get("slots") or []):
+        if not isinstance(raw, dict):
+            continue
+        try:
+            slot = int(raw.get("slot", 0))
+        except (TypeError, ValueError):
+            continue
+        if slot < 1:
+            continue
+        layout = str(raw.get("layout", "split")).lower()
+        entries = []
+        for e in (raw.get("entries") or []):
+            if isinstance(e, str):
+                e = {"command": e}
+            if not isinstance(e, dict):
+                continue
+            command = str(e.get("command") or "")
+            name = str(e.get("name") or (command.split()[0] if command else ""))
+            if not command and not name:
+                continue
+            # An entry with no command is kept rather than dropped: capture
+            # produces those for browser tabs, and the whole point is that you
+            # can see them and fill in the URL. The runner skips them.
+            entries.append({
+                "name": name,
+                "command": command,
+                "match": str(e.get("match") or ""),
+                "enabled": e.get("enabled") is not False and bool(command),
+                "note": str(e.get("note") or ""),
+            })
+        out.append({
+            "slot": slot,
+            "enabled": raw.get("enabled") is not False,
+            "layout": layout if layout in STARTUP_LAYOUTS else "split",
+            "entries": entries,
+        })
+    return out
+
+
+def clients_on(real_ws):
+    data = hypr_json("clients") or []
+    out = []
+    for c in data:
+        try:
+            if int(c["workspace"]["id"]) == int(real_ws):
+                out.append(c)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def launch_command(command):
+    try:
+        subprocess.Popen(["setsid", "uwsm-app", "--"] + shlex.split(command),
+                         stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def wait_for_new_window(real_ws, known, timeout=12.0):
+    """Wait for a window to appear on a workspace, return its address."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for c in clients_on(real_ws):
+            if c.get("address") and c["address"] not in known:
+                return c["address"]
+        time.sleep(0.3)
+    return None
+
+
+def group_windows(addresses):
+    """Put windows into one Hyprland group, so they stack instead of tiling."""
+    if len(addresses) < 2:
+        return
+    hypr('hl.dsp.focus({ window = "address:%s" })' % addresses[0])
+    time.sleep(0.3)
+    hypr("hl.dsp.group.toggle()")
+    time.sleep(0.3)
+    for addr in addresses[1:]:
+        hypr('hl.dsp.focus({ window = "address:%s" })' % addr)
+        time.sleep(0.2)
+        hypr('hl.dsp.window.move({ into_group = "l" })')
+        time.sleep(0.3)
+
+
+def run_startup(cfg, space_id, only_slot=None, force=False, verbose=True):
+    slots = startup_slots(cfg, space_id)
+    st = startup_config(cfg, space_id)
+    if st.get("enabled") is False and not force:
+        if verbose:
+            print("startup is disabled for %s" % space_id)
+        return 0
+    if not slots:
+        if verbose:
+            print("no startup layout for %s" % space_id)
+        return 0
+
+    offset = ws_offset(cfg, space_id)
+    started = 0
+    for entry_slot in slots:
+        if only_slot is not None and entry_slot["slot"] != only_slot:
+            continue
+        if not entry_slot["enabled"] and not force:
+            if verbose:
+                print("  slot %d: disabled" % entry_slot["slot"])
+            continue
+
+        real = offset + entry_slot["slot"]
+        existing = {c["address"] for c in clients_on(real) if c.get("address")}
+        present = {normalize_app_key(c.get("class")) for c in clients_on(real)}
+        opened = []
+
+        # Focus the slot first so anything without a window rule lands here.
+        hypr('hl.dsp.focus({ workspace = "%d" })' % real)
+        time.sleep(0.4)
+
+        for e in entry_slot["entries"]:
+            if not e["enabled"] or not e["command"]:
+                continue
+            if e["match"] and normalize_app_key(e["match"]) in present:
+                if verbose:
+                    print("  slot %d: %s already open" % (entry_slot["slot"], e["name"]))
+                continue
+            if verbose:
+                print("  slot %d: launching %s" % (entry_slot["slot"], e["name"]))
+            if not launch_command(e["command"]):
+                print("  slot %d: could not launch %s" % (entry_slot["slot"], e["name"]),
+                      file=sys.stderr)
+                continue
+            addr = wait_for_new_window(real, existing)
+            if addr:
+                existing.add(addr)
+                opened.append(addr)
+                started += 1
+            elif verbose:
+                print("  slot %d: %s did not open a window in time"
+                      % (entry_slot["slot"], e["name"]))
+
+        if entry_slot["layout"] == "stack":
+            group_windows([c["address"] for c in clients_on(real) if c.get("address")])
+
+    return started
+
+
+# --- capture -----------------------------------------------------------------
+
+BROWSER_APP_CLASS = re.compile(r"^(chrome|brave)-(.+?)__-(.+)$")
+
+
+def command_for_window(cfg, space_id, client):
+    """Best effort launch command for an open window.
+
+    Three cases, and only two of them are recoverable:
+
+      a normal app          /proc/<pid>/cmdline is the command, use it
+      a browser app window  the class encodes host and profile, rebuild it
+      a browser tab         every window shares one browser process, so the
+                            command says nothing about the page. Recorded with
+                            a blank command for you to fill in.
+    """
+    cls = str(client.get("class") or "")
+    title = str(client.get("title") or "")
+
+    m = BROWSER_APP_CLASS.match(cls)
+    if m:
+        kind, hostpath, profile = m.groups()
+        url = "https://" + hostpath.replace("_", "/").rstrip("/")
+        space = resolve_space(cfg, space_id) or {}
+        browser = (space.get("browser") or {}).get("command") or (
+            "google-chrome-stable" if kind == "chrome" else "brave")
+        prof = profile.replace("_", " ")
+        return {
+            "name": title or hostpath,
+            "command": '%s --profile-directory="%s" --app=%s' % (browser, prof, url),
+            "match": cls,
+            "enabled": True,
+        }
+
+    pid = client.get("pid")
+    argv = []
+    if pid:
+        try:
+            with open("/proc/%d/cmdline" % int(pid), "rb") as fh:
+                raw = fh.read().decode("utf-8", "replace")
+            argv = [a for a in raw.split("\0") if a]
+            # Normally cmdline is NUL separated, but some launchers leave it as
+            # one space joined string. Omarchy's Chrome arrives that way, and
+            # taking basename() of the whole line then yields the tail of a
+            # --load-extension path rather than the browser.
+            if len(argv) == 1 and " " in argv[0]:
+                try:
+                    argv = shlex.split(argv[0])
+                except ValueError:
+                    argv = argv[0].split()
+        except (OSError, ValueError):
+            argv = []
+
+    # A browser window that is not an app window: one process, many windows, so
+    # the command line describes the browser and not this page.
+    if argv and normalize_app_key(os.path.basename(argv[0])) in {
+            "chrome", "google-chrome", "google-chrome-stable", "brave", "brave-browser",
+            "chromium", "firefox"}:
+        return {
+            "name": title[:60] or cls,
+            "command": "",
+            "match": cls,
+            "enabled": False,
+            "note": "browser tab, add the URL yourself",
+        }
+
+    if not argv:
+        return {"name": title[:60] or cls, "command": "", "match": cls,
+                "enabled": False, "note": "could not read the command"}
+
+    return {
+        "name": title[:60] or cls,
+        "command": " ".join(shlex.quote(a) if " " in a else a for a in argv),
+        "match": cls,
+        "enabled": True,
+    }
+
+
+def cmd_startup(cfg, args):
+    sub = args[0] if args else "show"
+    rest = [a for a in args[1:] if not a.startswith("-")]
+    space_id = rest[0] if rest and find_space(cfg, rest[0]) else read_active(cfg)
+
+    if sub == "show":
+        slots = startup_slots(cfg, space_id)
+        st = startup_config(cfg, space_id)
+        space = find_space(cfg, space_id) or {}
+        print("%s (%s)  startup %s"
+              % (space.get("name") or space_id, space_id,
+                 "off" if st.get("enabled") is False else "on"))
+        if not slots:
+            print("  nothing recorded. Arrange a workspace, then:")
+            print("    omarchy-spaces startup capture")
+            return 0
+        for sl in slots:
+            print("  slot %-2d %-8s %s" % (sl["slot"], sl["layout"],
+                                           "" if sl["enabled"] else "(disabled)"))
+            for e in sl["entries"]:
+                mark = " " if e["enabled"] else "x"
+                detail = e["command"][:70] if e["command"] else (
+                    "needs a command: " + (e["note"] or "unknown"))
+                print("    [%s] %-26s %s" % (mark, e["name"][:26], detail))
+        return 0
+
+    if sub == "capture":
+        slot_arg = None
+        for a in args[1:]:
+            if a.isdigit():
+                slot_arg = int(a)
+        offset = ws_offset(cfg, space_id)
+        count = ws_count(cfg, space_id)
+        real_now = current_real_ws()
+        if slot_arg is None:
+            if real_now is None or not (1 <= real_now - offset <= count):
+                die("not on a workspace belonging to %s; pass a slot number" % space_id)
+            slot_arg = real_now - offset
+
+        real = offset + slot_arg
+        clients = clients_on(real)
+        if not clients:
+            die("nothing open on slot %d of %s" % (slot_arg, space_id))
+
+        entries = [command_for_window(cfg, space_id, c) for c in clients]
+        space = find_space(cfg, space_id)
+        st = space.setdefault("startup", {})
+        st.setdefault("enabled", True)
+        slots = st.setdefault("slots", [])
+        slots[:] = [x for x in slots if int(x.get("slot", 0)) != slot_arg]
+        slots.append({"slot": slot_arg, "enabled": True, "layout": "split",
+                      "entries": entries})
+        slots.sort(key=lambda x: int(x.get("slot", 0)))
+        save_config_file(cfg)
+
+        print("captured %d window(s) on slot %d of %s" % (len(entries), slot_arg, space_id))
+        for e in entries:
+            if e.get("note"):
+                print("  %-26s %s" % (e["name"][:26], e["note"]))
+            else:
+                print("  %-26s %s" % (e["name"][:26], e["command"][:70]))
+        incomplete = [e for e in entries if not e["command"]]
+        if incomplete:
+            print()
+            print("%d entry(s) need a command. Browser tabs share one process, so the"
+                  % len(incomplete))
+            print("page cannot be read back from a running window. Add the URL in the")
+            print("app under Startup, or make them app windows with --app=<url>.")
+        return 0
+
+    if sub == "run":
+        only = None
+        for a in args[1:]:
+            if a.isdigit():
+                only = int(a)
+        if "--login" in args and startup_config(cfg, space_id).get("runOnLogin") is not True:
+            return 0
+        started = run_startup(cfg, space_id, only_slot=only, force="--force" in args)
+        print("opened %d window(s)" % started)
+        return 0
+
+    if sub in ("enable", "disable"):
+        space = find_space(cfg, space_id)
+        st = space.setdefault("startup", {})
+        target = None
+        for a in args[1:]:
+            if a.isdigit():
+                target = int(a)
+        if target is None:
+            st["enabled"] = (sub == "enable")
+            save_config_file(cfg)
+            print("startup %sd for %s" % (sub, space_id))
+            return 0
+        for sl in st.get("slots") or []:
+            if int(sl.get("slot", 0)) == target:
+                sl["enabled"] = (sub == "enable")
+                save_config_file(cfg)
+                print("slot %d %sd for %s" % (target, sub, space_id))
+                return 0
+        die("slot %d has nothing recorded for %s" % (target, space_id))
+
+    if sub == "forget":
+        space = find_space(cfg, space_id)
+        target = None
+        for a in args[1:]:
+            if a.isdigit():
+                target = int(a)
+        st = space.get("startup") or {}
+        if target is None:
+            space.pop("startup", None)
+            save_config_file(cfg)
+            print("cleared the startup layout for %s" % space_id)
+            return 0
+        st["slots"] = [x for x in (st.get("slots") or []) if int(x.get("slot", 0)) != target]
+        save_config_file(cfg)
+        print("forgot slot %d for %s" % (target, space_id))
+        return 0
+
+    die("usage: omarchy-spaces startup [show|capture|run|enable|disable|forget] [space] [slot]")
+
+
 MENU_BEGIN = "  // >>> omarchy-spaces managed block, do not edit by hand"
 MENU_END = "  // <<< omarchy-spaces managed block"
 MENU_PATH = os.path.join(CONFIG_HOME, "omarchy", "extensions", "omarchy-menu.jsonc")
@@ -1870,6 +2259,13 @@ Keybinds
   keybinds print          print the Lua block without writing it
   windowrules show        which app lands in which space and slot
   windowrules print       the generated Hyprland rules
+
+Startup layouts
+  startup show [space]           what each slot opens
+  startup capture [slot]         record what is open on a slot right now
+  startup run [space] [slot]     open it, --login honours runOnLogin
+  startup enable|disable [slot]  a whole space, or one slot
+  startup forget [slot]          drop a slot, or the whole layout
 """
 
 
@@ -1882,7 +2278,7 @@ COMMANDS = {
     "move-to-space": cmd_move_to_space, "windows": cmd_windows,
     "appearance": cmd_appearance, "discover": cmd_discover,
     "export": cmd_export, "import": cmd_import, "keybinds": cmd_keybinds,
-    "windowrules": cmd_windowrules,
+    "windowrules": cmd_windowrules, "startup": cmd_startup,
 }
 
 

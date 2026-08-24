@@ -8,6 +8,8 @@ echo "parity"
 ./test/parity.sh
 echo "embedded config"
 python3 test/embedded.test.py
+echo "startup layouts"
+python3 test/startup.test.py | tail -2
 echo "theme mapping"
 python3 test/theme.test.py | tail -2
 echo "keybind tables"

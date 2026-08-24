@@ -47,6 +47,10 @@ a switch, which keeps it instant.
 What the desktop looks like. A space can pin a theme, font, and background,
 applied on switch.
 
+What opens where. A space can record what each of its workspaces contains and
+replay it on demand or at login, tiled or stacked. See
+[Startup layouts](docs/Startup-layouts.md).
+
 ## Notification policy
 
 Each space declares which spaces' notifications it will show, and a schedule
@@ -215,7 +219,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 1.0.1, running on Omarchy 4.0.0 with no QML warnings.
+Version 1.1.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -295,6 +299,7 @@ Full docs live in [`docs/`](docs/), and are mirrored to the
 - [Creating a space](docs/Creating-a-space.md)
 - [Editing a space](docs/Editing-a-space.md)
 - [Defaults and inheritance](docs/Defaults-and-inheritance.md)
+- [Startup layouts](docs/Startup-layouts.md)
 - [Apps and segmentation](docs/Apps-and-segmentation.md)
 - [The default space](docs/Default-space.md)
 - [How notifications are routed](docs/How-notifications-are-routed.md)

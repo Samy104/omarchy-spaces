@@ -20,6 +20,12 @@ omarchy-spaces move-to-workspace <n>    move the focused window to slot n
 omarchy-spaces move-to-space <id> [n]   send the focused window to another space
 omarchy-spaces windows                  list open windows grouped by space
 
+omarchy-spaces startup show [space]     what each workspace opens
+omarchy-spaces startup capture [slot]   record the workspace you are on
+omarchy-spaces startup run [space][slot] open it
+omarchy-spaces startup enable|disable   a space, or one slot
+omarchy-spaces startup forget [slot]    drop a slot, or the whole layout
+
 omarchy-spaces appearance show          pinned look vs the live one
 omarchy-spaces appearance capture       save the current theme, font, background
 omarchy-spaces appearance apply         re-apply the pinned look

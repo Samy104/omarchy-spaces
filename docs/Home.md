@@ -26,6 +26,7 @@ matters is whether a work message should interrupt your evening.
 - [Creating a space](Creating-a-space)
 - [Editing a space](Editing-a-space)
 - [Defaults and inheritance](Defaults-and-inheritance)
+- [Startup layouts](Startup-layouts)
 - [Apps and segmentation](Apps-and-segmentation)
 - [The default space](Default-space)
 - [How notifications are routed](How-notifications-are-routed)

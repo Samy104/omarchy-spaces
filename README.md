@@ -88,8 +88,27 @@ omarchy restart shell
 on your PATH, and writes a starter config. Everything lives under `$HOME` and
 needs no sudo. Drop `--with-url-handler` if you do not want link routing yet.
 
+Add the space rows to the Omarchy menu:
+
+```bash
+omarchy-spaces install-menu
+```
+
+That splices a delimited block into
+`~/.config/omarchy/extensions/omarchy-menu.jsonc`, leaving your own entries and
+comments untouched. Re-run it after adding a space. `omarchy-spaces remove-menu`
+takes it back out.
+
 Add keybindings from `hypr/spaces.lua` to `~/.config/hypr/bindings.lua`. Check
 for conflicts first with `omarchy menu keybindings --print`.
+
+| Keys | Action |
+|---|---|
+| SUPER + ALT + O | Open the picker |
+| SUPER + ALT + N | Next space |
+| SUPER + ALT + I | Show the current policy |
+| SUPER + ALT + P | Switch to personal |
+| SUPER + ALT + W | Switch to work |
 
 ## Command line
 
@@ -104,6 +123,9 @@ omarchy-spaces which [url]          print the argv `open` would run
 omarchy-spaces get <field>          read a field off the active space
 omarchy-spaces init [--force]       write a starter config
 omarchy-spaces validate             check for gaps, overlaps, bad references
+omarchy-spaces install-menu         add the space rows to the Omarchy menu
+omarchy-spaces remove-menu          take them back out
+omarchy-spaces menu                 print the rows without writing anything
 ```
 
 `get` reads any top level field, plus `assistant.<tool>`:
@@ -145,9 +167,12 @@ something you edit and state is something the system writes.
 ## Testing
 
 ```bash
-node test/logic.test.js   # 25 unit tests over the policy rules
-./test/parity.sh          # python CLI and JS plugin agree on all 2880 cases
+./test/run.sh             # everything
 ```
+
+Four suites. 25 unit tests over the policy rules, 2880 parity comparisons, a
+check that the embedded starter config matches the repo copy, and a CLI smoke
+test that runs the binary from a directory with no repo above it.
 
 The policy rules exist twice, once in `SpacesLogic.js` for the shell plugin and
 once in `bin/omarchy-spaces` for the CLI. The CLI is python because Hyprland
@@ -160,15 +185,17 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.1.0. The policy engine, the CLI, browser routing, hooks, and config
-validation are covered by tests and work today.
+Version 0.1.1, running on Omarchy 4.0.0 with no QML warnings.
 
-The QML side has not yet run inside a live Omarchy shell. `Service.qml`,
-`BarWidget.qml`, and `Panel.qml` are written against the Omarchy 4 plugin
-contract and the real APIs of `omarchy.notifications`, but expect to fix
-something on first load. The panel currently shows the policy and switches
-spaces. Editing the schedule from the panel is the next milestone, and until
-then editing means the JSON file, reachable with a middle click on the bar icon.
+Verified on a live shell: the bar widget renders and follows a switch made from
+anywhere, a personal-app notification is suppressed while the work space is
+active, a work-app notification still gets through, and both land in history
+either way. The policy engine, CLI, browser routing, hooks, menu picker, and
+config validation are covered by the test suite.
+
+Not built yet. There is no in-shell editor for the schedule, so changing rules
+means editing `spaces.json`. A custom panel would need its own Wayland layer
+window, and the Omarchy menu already gives a good picker, so that is parked.
 
 ## License
 

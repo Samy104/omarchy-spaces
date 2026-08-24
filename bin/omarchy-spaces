@@ -27,6 +27,58 @@ CONFIG_PATH = os.path.join(CONFIG_HOME, "omarchy-spaces", "spaces.json")
 STATE_DIR = os.path.join(STATE_HOME, "omarchy-spaces")
 ACTIVE_PATH = os.path.join(STATE_DIR, "active")
 
+DEFAULT_CONFIG = r"""{
+  "version": 1,
+  "activeSpace": "personal",
+  "criticalBypass": true,
+  "spaces": [
+    {
+      "id": "personal",
+      "name": "Personal",
+      "icon": "󰃜",
+      "color": "#7aa2f7",
+      "browser": { "command": "brave", "profile": "Default" },
+      "email": "samy104@gmail.com",
+      "assistants": {
+        "claude": "personal",
+        "codex": "personal"
+      },
+      "apps": ["Signal", "Spotify", "Brave-browser", "org.gnome.Photos"],
+      "notifications": {
+        "allowFrom": ["personal", "work"],
+        "allowUnassigned": true,
+        "schedule": [
+          { "from": "08:00", "to": "17:00", "allowFrom": ["personal", "work"], "label": "Work hours, everything" },
+          { "from": "17:00", "to": "22:00", "allowFrom": ["personal"], "label": "Evening, personal only" },
+          { "from": "22:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Night, silent" }
+        ]
+      }
+    },
+    {
+      "id": "work",
+      "name": "HiScale",
+      "icon": "󰌛",
+      "color": "#9ece6a",
+      "browser": { "command": "brave", "profile": "Profile 1" },
+      "email": "samy@hiscalesolutions.com",
+      "assistants": {
+        "claude": "work",
+        "codex": "work"
+      },
+      "apps": ["Slack", "zoom", "google-chrome", "Thunderbird"],
+      "notifications": {
+        "allowFrom": ["work"],
+        "allowUnassigned": false,
+        "schedule": [
+          { "from": "08:00", "to": "18:00", "allowFrom": ["work"], "label": "Work hours" },
+          { "from": "18:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Off hours, silent" }
+        ]
+      }
+    }
+  ]
+}
+"""
+
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -309,10 +361,8 @@ def cmd_init(cfg_unused, args):
     os.makedirs(target_dir, exist_ok=True)
     if os.path.exists(CONFIG_PATH) and "--force" not in args:
         die("config already exists at %s (use --force to overwrite)" % CONFIG_PATH)
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    example = os.path.join(here, "config", "spaces.example.json")
-    with open(example) as src, open(CONFIG_PATH, "w") as dst:
-        dst.write(src.read())
+    with open(CONFIG_PATH, "w") as dst:
+        dst.write(DEFAULT_CONFIG)
     print("wrote %s" % CONFIG_PATH)
     return 0
 
@@ -355,6 +405,99 @@ def cmd_validate(cfg, args):
     return 0
 
 
+
+MENU_BEGIN = "  // >>> omarchy-spaces managed block, do not edit by hand"
+MENU_END = "  // <<< omarchy-spaces managed block"
+MENU_PATH = os.path.join(CONFIG_HOME, "omarchy", "extensions", "omarchy-menu.jsonc")
+
+
+def menu_block(cfg):
+    """Rows for the Omarchy menu, one per space, with the active one checked."""
+    lines = [MENU_BEGIN]
+    lines.append('  "spaces": {"icon":"\uf0c9","label":"Spaces"},')
+    for s in cfg["spaces"]:
+        sid = str(s["id"])
+        icon = s.get("icon") or ""
+        name = s.get("name") or sid
+        desc = s.get("email") or ""
+        lines.append(
+            '  "spaces.%s": {"icon":"%s","label":"%s","description":"%s",'
+            '"action":"omarchy-spaces switch %s",'
+            '"checked":"[ \\"$(omarchy-spaces current)\\" = %s ]"},'
+            % (sid, icon, name, desc, sid, sid)
+        )
+    lines.append(MENU_END)
+    return "\n".join(lines)
+
+
+def cmd_menu(cfg, args):
+    print(menu_block(cfg))
+    return 0
+
+
+def cmd_install_menu(cfg, args):
+    """Insert the space rows into the Omarchy menu extension file.
+
+    The file is JSONC with comments the user may have written, so this splices
+    a delimited block in rather than reserializing. Running it again replaces
+    the previous block instead of duplicating it.
+    """
+    os.makedirs(os.path.dirname(MENU_PATH), exist_ok=True)
+    if os.path.exists(MENU_PATH):
+        text = open(MENU_PATH).read()
+    else:
+        text = "{\n}\n"
+
+    lines = text.splitlines()
+    out, skipping = [], False
+    for line in lines:
+        if line.strip() == MENU_BEGIN.strip():
+            skipping = True
+            continue
+        if line.strip() == MENU_END.strip():
+            skipping = False
+            continue
+        if not skipping:
+            out.append(line)
+
+    close = None
+    for i in range(len(out) - 1, -1, -1):
+        if out[i].strip() == "}":
+            close = i
+            break
+    if close is None:
+        die("could not find the closing brace in %s" % MENU_PATH)
+
+    out[close:close] = menu_block(cfg).split("\n")
+    tmp = MENU_PATH + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(out) + "\n")
+    os.replace(tmp, MENU_PATH)
+    print("updated %s" % MENU_PATH)
+    return 0
+
+
+def cmd_remove_menu(cfg, args):
+    if not os.path.exists(MENU_PATH):
+        print("nothing to remove")
+        return 0
+    lines = open(MENU_PATH).read().splitlines()
+    out, skipping = [], False
+    for line in lines:
+        if line.strip() == MENU_BEGIN.strip():
+            skipping = True
+            continue
+        if line.strip() == MENU_END.strip():
+            skipping = False
+            continue
+        if not skipping:
+            out.append(line)
+    with open(MENU_PATH, "w") as fh:
+        fh.write("\n".join(out) + "\n")
+    print("removed the managed block from %s" % MENU_PATH)
+    return 0
+
+
 USAGE = """omarchy-spaces, context spaces for Omarchy
 
   list                    show every space, the active one is marked
@@ -367,13 +510,17 @@ USAGE = """omarchy-spaces, context spaces for Omarchy
   get <field>             read a field off the active space
   init [--force]          write a starter config
   validate                check the config for gaps, overlaps, and bad refs
+  install-menu            add the space rows to the Omarchy menu
+  remove-menu             take them back out
+  menu                    print the menu rows without writing anything
 """
 
 
 COMMANDS = {
     "list": cmd_list, "current": cmd_current, "switch": cmd_switch,
     "status": cmd_status, "open": cmd_open, "which": cmd_which,
-    "get": cmd_get, "validate": cmd_validate,
+    "get": cmd_get, "validate": cmd_validate, "menu": cmd_menu,
+    "install-menu": cmd_install_menu, "remove-menu": cmd_remove_menu,
 }
 
 

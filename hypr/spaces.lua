@@ -1,18 +1,16 @@
 -- Omarchy Spaces keybindings.
 --
--- Copy the bindings you want into ~/.config/hypr/bindings.lua, or require this
--- file from it. Every default here uses SUPER + ALT, which Omarchy 4 leaves
--- mostly free apart from window grouping.
+-- Copy the ones you want into ~/.config/hypr/bindings.lua. Every default here
+-- uses SUPER + ALT, which Omarchy 4 leaves largely free apart from window
+-- grouping (arrows, TAB, G, S) and the Apps menu (SPACE).
 --
--- Check for conflicts before adding: omarchy menu keybindings --print
+-- Check before adding: omarchy menu keybindings --print
 
--- Cycle through spaces
-o.bind("SUPER + ALT + SPACE", "Next space", "omarchy-spaces next")
-o.bind("SUPER + ALT + SHIFT + SPACE", "Previous space", "omarchy-spaces prev")
+o.bind("SUPER + ALT + O", "Spaces picker", "omarchy menu summon spaces")
+o.bind("SUPER + ALT + N", "Next space", "omarchy-spaces next")
+o.bind("SUPER + ALT + I", "Space status",
+  "bash -lc 'omarchy-notification-send \"$(omarchy-spaces status)\"'")
 
--- Jump straight to a space by id
-o.bind("SUPER + ALT + P", "Space: personal", "omarchy-spaces switch personal")
-o.bind("SUPER + ALT + W", "Space: work", "omarchy-spaces switch work")
-
--- Show the current policy as a notification
-o.bind("SUPER + ALT + I", "Space status", "bash -lc 'omarchy-notification-send -g 󰃜 \"$(omarchy-spaces status)\"'")
+-- One key per space. Rename these to match your own space ids.
+o.bind("SUPER + ALT + P", "Space: Personal", "omarchy-spaces switch personal")
+o.bind("SUPER + ALT + W", "Space: HiScale", "omarchy-spaces switch work")

@@ -4,106 +4,61 @@ import qs.Ui
 
 // Bar indicator for the active space.
 //
-// Left click opens the switcher panel, right click cycles to the next space,
-// middle click opens the config file in the editor. The dot in the corner
-// means the current policy is blocking something, so a quiet desktop is
-// never ambiguous about whether it is quiet on purpose.
+// Left and right click open the Spaces picker in the Omarchy menu, middle
+// click cycles to the next space. The label carries the space icon and name,
+// and goes to the urgent color when the current policy blocks everything, so
+// a silent desktop is never ambiguous about whether it is silent on purpose.
 BarWidget {
   id: root
   moduleName: "spaces.omarchy-spaces"
 
-  readonly property var spacesService: root.bar && root.bar.shell
-    ? root.bar.shell.serviceFor("spaces.omarchy-spaces") : null
+  readonly property var spacesService: bar && bar.shell
+    ? bar.shell.serviceFor("spaces.omarchy-spaces") : null
 
   readonly property string spaceId: spacesService ? spacesService.activeSpaceId : ""
+  readonly property string spaceIcon: spacesService ? spacesService.iconFor(spaceId) : ""
   readonly property string spaceName: spacesService ? spacesService.displayName(spaceId) : ""
-  readonly property string spaceIcon: spacesService ? spacesService.iconFor(spaceId) : "●"
-  readonly property string spaceColor: spacesService ? spacesService.colorFor(spaceId) : ""
   readonly property bool filtering: spacesService ? spacesService.filtering : false
   readonly property bool fullyMuted: spacesService ? spacesService.fullyMuted : false
 
   readonly property bool showLabel: setting("showLabel", true)
   readonly property bool showPolicyDot: setting("showPolicyDot", true)
 
-  implicitWidth: layout.implicitWidth + Style.bar.paddingH * 2
-  implicitHeight: parent ? parent.height : Style.bar.sizeHorizontal
-
-  Row {
-    id: layout
-    anchors.centerIn: parent
-    spacing: 6
-
-    Item {
-      width: iconText.implicitWidth
-      height: iconText.implicitHeight
-      anchors.verticalCenter: parent.verticalCenter
-
-      Text {
-        id: iconText
-        text: root.spaceIcon
-        color: root.spaceColor !== "" ? root.spaceColor : Style.colors.foreground
-        font.family: Style.font.family
-        font.pixelSize: Style.font.sizeM
-      }
-
-      // Hollow dot for partial filtering, filled for a full mute.
-      Rectangle {
-        visible: root.showPolicyDot && root.filtering
-        width: 5
-        height: 5
-        radius: 2.5
-        color: root.fullyMuted ? Style.colors.error : "transparent"
-        border.width: root.fullyMuted ? 0 : 1
-        border.color: Style.colors.warning
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.rightMargin: -3
-        anchors.topMargin: -1
-      }
-    }
-
-    Text {
-      visible: root.showLabel && !root.vertical && root.spaceName !== ""
-      text: root.spaceName
-      color: Style.colors.foreground
-      font.family: Style.font.family
-      font.pixelSize: Style.font.sizeS
-      anchors.verticalCenter: parent.verticalCenter
-    }
+  // A dot appended to the label rather than an overlaid Rectangle. The bar
+  // lays widgets out by implicit size, and a floating child would either be
+  // clipped or push the neighbours around.
+  readonly property string policyMark: {
+    if (!showPolicyDot || !filtering) return ""
+    return fullyMuted ? " ●" : " ○"
   }
 
-  MouseArea {
+  readonly property string label: {
+    if (!spacesService) return ""
+    if (spaceIcon === "" && spaceName === "") return ""
+    var text = spaceIcon
+    if (showLabel && !vertical && spaceName !== "") {
+      text = text === "" ? spaceName : text + " " + spaceName
+    }
+    return text + policyMark
+  }
+
+  visible: label !== ""
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
+  WidgetButton {
+    id: button
     anchors.fill: parent
-    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-    hoverEnabled: true
-    onClicked: function (mouse) {
-      if (mouse.button === Qt.LeftButton) root.togglePanel()
-      else if (mouse.button === Qt.RightButton && root.spacesService) root.spacesService.cycle(1)
-      else if (mouse.button === Qt.MiddleButton) root.openConfig()
-    }
-  }
+    bar: root.bar
+    text: root.label
+    active: root.fullyMuted
+    tooltipText: root.spaceName === "" ? "" : ("Space: " + root.spaceName)
 
-  function openConfig() {
-    if (spacesService) spacesService.openConfigInEditor()
-  }
-
-  function togglePanel() {
-    if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
-  }
-
-  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
-  function open() { if (panelLoader.item && panelLoader.item.open) panelLoader.item.open() }
-  function close() { if (panelLoader.item && panelLoader.item.close) panelLoader.item.close() }
-
-  Loader {
-    id: panelLoader
-    source: "Panel.qml"
-    active: true
-    onLoaded: {
-      if ("bar" in item) item.bar = root.bar
-      if ("anchorItem" in item) item.anchorItem = root
-      if ("hostWidget" in item) item.hostWidget = root
-      if ("spacesService" in item) item.spacesService = root.spacesService
+    onPressed: function (b) {
+      if (!root.bar) return
+      if (b === Qt.MiddleButton) root.bar.run("omarchy-spaces next")
+      else if (b === Qt.RightButton) root.bar.run("omarchy menu summon spaces")
+      else root.bar.run("omarchy menu summon spaces")
     }
   }
 }

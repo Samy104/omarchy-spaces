@@ -116,17 +116,38 @@ Item {
                             { criticalUrgency: criticalUrgency })
   }
 
+  // Guards against re-entering the sweep. removePopup mutates popupModel,
+  // which re-fires the model signals this service listens to. Without the
+  // guard the sweep recurses into a half-mutated model and the notification
+  // card renders a row whose fields are all undefined.
+  property bool sweeping: false
+
+  function sweepPopups() {
+    if (sweeping) return
+    Qt.callLater(runSweep)
+  }
+
   // Walk the popup model backwards and drop anything the current policy blocks.
   // Backwards because removePopup shifts every index above the one removed.
-  function sweepPopups() {
+  //
+  // Deferred through Qt.callLater so the model is never mutated from inside
+  // its own change signal.
+  function runSweep() {
+    if (sweeping) return
     if (!configLoaded) return
     var ns = notificationService
     if (!ns || !ns.popupModel) return
-    for (var i = ns.popupModel.count - 1; i >= 0; i--) {
-      var row = ns.popupModel.get(i)
-      if (!row) continue
-      var verdict = decide({ app: row.app, urgency: row.urgency })
-      if (!verdict.show) ns.removePopup(i, "omarchy-spaces-filtered")
+    sweeping = true
+    try {
+      for (var i = ns.popupModel.count - 1; i >= 0; i--) {
+        if (i >= ns.popupModel.count) continue
+        var row = ns.popupModel.get(i)
+        if (!row || row.app === undefined) continue
+        var verdict = decide({ app: row.app, urgency: row.urgency })
+        if (!verdict.show) ns.removePopup(i, "dismiss")
+      }
+    } finally {
+      sweeping = false
     }
   }
 
@@ -158,12 +179,14 @@ Item {
     spaceChanged(activeSpaceId)
   }
 
+  // Only rowsInserted. Listening to countChanged as well would fire on this
+  // service's own removals and turn every filtered notification into a second
+  // sweep pass.
   Connections {
     target: service.notificationService && service.notificationService.popupModel
       ? service.notificationService.popupModel : null
     ignoreUnknownSignals: true
     function onRowsInserted() { service.sweepPopups() }
-    function onCountChanged() { service.sweepPopups() }
   }
 
   // --- clock -----------------------------------------------------------------
@@ -184,50 +207,81 @@ Item {
 
   // --- files -----------------------------------------------------------------
 
-  FileView {
-    id: configFile
-    path: service.configPath
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      try {
-        var parsed = JSON.parse(text())
-        service.config = parsed
-        service.configError = ""
-        service.configLoaded = true
-        if (!Logic.findSpace(parsed, service.activeSpaceId)) {
-          var ids = Logic.spaceIds(parsed)
-          service.activeSpaceId = (parsed.activeSpace && Logic.findSpace(parsed, parsed.activeSpace))
-            ? String(parsed.activeSpace)
-            : (ids.length ? ids[0] : "")
+  // Both files are rewritten by atomic rename (the CLI writes a .tmp and calls
+  // os.replace, and most editors do the same). A rename swaps the inode, so a
+  // FileView pointed at the file keeps watching the old one and never fires.
+  // Watching the parent directory and re-reading through a Process is the same
+  // workaround Omarchy's own Bar.qml uses for its toggles flag.
+
+  Component.onCompleted: {
+    ensureDirs.running = true
+  }
+
+  Process {
+    id: ensureDirs
+    command: ["bash", "-c", "mkdir -p " + JSON.stringify(service.configDir) + " " + JSON.stringify(service.stateDir)]
+    onExited: {
+      configProbe.running = true
+      activeProbe.running = true
+    }
+  }
+
+  Process {
+    id: configProbe
+    command: ["bash", "-c", "cat " + JSON.stringify(service.configPath) + " 2>/dev/null"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var raw = String(text || "").trim()
+        if (raw === "") {
+          service.configError = "no config at " + service.configPath
+          service.configLoaded = false
+          return
         }
-        service.sweepPopups()
-      } catch (e) {
-        service.configError = String(e)
-        console.warn("omarchy-spaces: config parse failed: " + e)
+        try {
+          var parsed = JSON.parse(raw)
+          service.config = parsed
+          service.configError = ""
+          service.configLoaded = true
+          if (!Logic.findSpace(parsed, service.activeSpaceId)) {
+            var ids = Logic.spaceIds(parsed)
+            service.activeSpaceId = (parsed.activeSpace && Logic.findSpace(parsed, parsed.activeSpace))
+              ? String(parsed.activeSpace)
+              : (ids.length ? ids[0] : "")
+          }
+          service.sweepPopups()
+        } catch (e) {
+          service.configError = String(e)
+          console.warn("omarchy-spaces: config parse failed: " + e)
+        }
       }
     }
-    onLoadFailed: {
-      service.configError = "no config at " + service.configPath
-      service.configLoaded = false
+  }
+
+  Process {
+    id: activeProbe
+    command: ["bash", "-c", "cat " + JSON.stringify(service.activePath) + " 2>/dev/null"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var id = String(text || "").trim()
+        if (id !== "" && id !== service.activeSpaceId) service.activeSpaceId = id
+      }
     }
   }
 
   FileView {
-    id: activeFile
-    path: service.activePath
+    path: service.configDir
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      var id = String(text() || "").trim()
-      if (id && id !== service.activeSpaceId) service.activeSpaceId = id
-    }
-    onLoadFailed: {
-      // No state file yet. The config's activeSpace is the fallback, and the
-      // first switch through the CLI creates the file.
-    }
+    onFileChanged: configProbe.running = true
+  }
+
+  FileView {
+    path: service.stateDir
+    watchChanges: true
+    printErrors: false
+    onFileChanged: activeProbe.running = true
   }
 
   Process {
@@ -237,8 +291,8 @@ Item {
   Process {
     id: switchProcess
     onExited: function () {
-      activeFile.reload()
-      configFile.reload()
+      activeProbe.running = true
+      configProbe.running = true
     }
   }
 }

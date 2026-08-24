@@ -168,5 +168,48 @@ test("unknown space yields null so callers fall back", function () {
   assert.strictEqual(L.browserCommand(config, "nope", "https://x.test"), null)
 })
 
+console.log("\ndefaults inheritance")
+test("a space inherits what it does not set", function () {
+  var c = { defaults: { browser: { command: "brave" }, workspaces: { count: 6 } },
+            spaces: [{ id: "a", browser: { profile: "Default" } }] }
+  var r = L.resolveSpace(c, "a")
+  assert.strictEqual(r.browser.command, "brave")
+  assert.strictEqual(r.browser.profile, "Default")
+  assert.strictEqual(L.wsCount(c, "a"), 6)
+})
+test("a space overrides what it does set", function () {
+  var c = { defaults: { browser: { command: "brave" } },
+            spaces: [{ id: "a", browser: { command: "chromium" } }] }
+  assert.strictEqual(L.resolveSpace(c, "a").browser.command, "chromium")
+})
+test("arrays replace rather than merge", function () {
+  var c = { defaults: { apps: ["A", "B"] }, spaces: [{ id: "a", apps: ["C"] }] }
+  assert.deepStrictEqual(L.resolveSpace(c, "a").apps, ["C"])
+})
+test("identity is never inherited", function () {
+  var c = { defaults: { name: "Nope", icon: "X", color: "#fff" }, spaces: [{ id: "a" }] }
+  var r = L.resolveSpace(c, "a")
+  assert.strictEqual(r.name, undefined)
+  assert.strictEqual(r.icon, undefined)
+  assert.strictEqual(r.color, undefined)
+})
+test("inheritedKeys reports only what was not set locally", function () {
+  var c = { defaults: { browser: { command: "brave" }, apps: ["A"] },
+            spaces: [{ id: "a", apps: ["B"] }] }
+  assert.deepStrictEqual(L.inheritedKeys(c, "a"), ["browser"])
+})
+test("no defaults block leaves spaces untouched", function () {
+  var c = { spaces: [{ id: "a", apps: ["X"] }] }
+  assert.deepStrictEqual(L.resolveSpace(c, "a"), { id: "a", apps: ["X"] })
+})
+test("a schedule set once in defaults applies to every space", function () {
+  var c = { defaults: { notifications: { schedule: [
+              { from: "22:00", to: "08:00", allowFrom: [], allowUnassigned: false }] } },
+            spaces: [{ id: "a", notifications: { allowFrom: ["a"] } }, { id: "b" }] }
+  assert.strictEqual(L.resolvePolicy(c, "a", L.parseTime("23:00")).allowFrom.length, 0)
+  assert.strictEqual(L.resolvePolicy(c, "b", L.parseTime("23:00")).allowFrom.length, 0)
+  assert.strictEqual(L.resolvePolicy(c, "a", L.parseTime("10:00")).allowFrom[0], "a")
+})
+
 console.log("\n" + passed + " passed, " + failed + " failed\n")
 process.exit(failed === 0 ? 0 : 1)

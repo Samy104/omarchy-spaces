@@ -59,6 +59,62 @@ function spaceIds(config) {
   return out
 }
 
+
+// Defaults inheritance.
+//
+// A top-level `defaults` object supplies values for every space. A space
+// overrides what it sets and inherits the rest, so a shared schedule, browser,
+// or workspace count is written once.
+//
+// Objects merge one key at a time, recursively. Arrays and scalars are
+// replaced whole, because a half-inherited list is harder to reason about than
+// an explicit one. Identity fields are never inherited.
+var IDENTITY_KEYS = ["id", "name", "icon", "color"]
+
+function isPlainObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+}
+
+function deepMerge(base, override) {
+  if (!isPlainObject(base)) return override
+  if (!isPlainObject(override)) return override === undefined ? base : override
+  var out = {}
+  var k
+  for (k in base) out[k] = base[k]
+  for (k in override) {
+    out[k] = (isPlainObject(out[k]) && isPlainObject(override[k]))
+      ? deepMerge(out[k], override[k])
+      : override[k]
+  }
+  return out
+}
+
+function resolveSpace(config, spaceId) {
+  var space = findSpace(config, spaceId)
+  if (!space) return null
+  var defaults = (config && isPlainObject(config.defaults)) ? config.defaults : null
+  if (!defaults) return space
+  var base = {}
+  for (var k in defaults) {
+    if (IDENTITY_KEYS.indexOf(k) === -1) base[k] = defaults[k]
+  }
+  return deepMerge(base, space)
+}
+
+// Which keys a space inherits rather than sets itself. The config app uses
+// this to mark a field as inherited instead of pretending the user chose it.
+function inheritedKeys(config, spaceId) {
+  var space = findSpace(config, spaceId)
+  var defaults = (config && isPlainObject(config.defaults)) ? config.defaults : null
+  if (!space || !defaults) return []
+  var out = []
+  for (var k in defaults) {
+    if (IDENTITY_KEYS.indexOf(k) !== -1) continue
+    if (space[k] === undefined) out.push(k)
+  }
+  return out
+}
+
 // Which space owns an app, decided by the `apps` list on each space. Matching
 // is case insensitive and ignores a trailing ".desktop", because the same app
 // reaches us as "Signal", "signal", and "signal.desktop" depending on whether
@@ -72,11 +128,12 @@ function normalizeAppKey(name) {
 function spaceForApp(config, appName) {
   var key = normalizeAppKey(appName)
   if (!key) return null
-  var spaces = (config && Array.isArray(config.spaces)) ? config.spaces : []
-  for (var i = 0; i < spaces.length; i++) {
-    var apps = normalizeList(spaces[i] && spaces[i].apps)
+  var ids = spaceIds(config)
+  for (var i = 0; i < ids.length; i++) {
+    var resolved = resolveSpace(config, ids[i])
+    var apps = normalizeList(resolved && resolved.apps)
     for (var j = 0; j < apps.length; j++) {
-      if (normalizeAppKey(apps[j]) === key) return String(spaces[i].id)
+      if (normalizeAppKey(apps[j]) === key) return String(ids[i])
     }
   }
   return null
@@ -89,7 +146,7 @@ function spaceForApp(config, appName) {
 // override that baseline for the hours they cover. The first matching window
 // wins, so order matters and callers should keep windows non overlapping.
 function resolvePolicy(config, activeSpaceId, nowMinutes) {
-  var space = findSpace(config, activeSpaceId)
+  var space = resolveSpace(config, activeSpaceId)
   if (!space) {
     return { allowFrom: spaceIds(config), source: "no-space", window: null, allowUnassigned: true }
   }
@@ -160,7 +217,7 @@ function shouldShow(config, activeSpaceId, notification, nowMinutes, options) {
 // Browser command for a space, as an argv array. Returns null when the space
 // declares no browser, so callers can fall back to xdg-open.
 function browserCommand(config, spaceId, url) {
-  var space = findSpace(config, spaceId)
+  var space = resolveSpace(config, spaceId)
   var browser = space && space.browser
   if (!browser || !browser.command) return null
 
@@ -178,7 +235,7 @@ function browserCommand(config, spaceId, url) {
 var DEFAULT_WS_COUNT = 10
 
 function wsCount(config, spaceId) {
-  var space = findSpace(config, spaceId)
+  var space = resolveSpace(config, spaceId)
   if (!space) return DEFAULT_WS_COUNT
   var ws = space.workspaces || {}
   var n = parseInt(ws.count, 10)
@@ -186,7 +243,7 @@ function wsCount(config, spaceId) {
 }
 
 function wsOffset(config, spaceId) {
-  var space = findSpace(config, spaceId)
+  var space = resolveSpace(config, spaceId)
   if (!space) return 0
   var ws = space.workspaces || {}
   if (ws.offset !== undefined && ws.offset !== null) {
@@ -227,7 +284,10 @@ var api = {
   DEFAULT_WS_COUNT: DEFAULT_WS_COUNT,
   wsCount: wsCount,
   wsOffset: wsOffset,
-  slotForReal: slotForReal
+  slotForReal: slotForReal,
+  deepMerge: deepMerge,
+  resolveSpace: resolveSpace,
+  inheritedKeys: inheritedKeys
 }
 
 if (typeof module !== "undefined" && module.exports) module.exports = api

@@ -7,12 +7,22 @@ exec(open(os.path.join(here, "..", "bin", "omarchy-spaces")).read().replace(
     'if __name__ == "__main__":\n    sys.exit(main(sys.argv[1:]))', ''), cli.__dict__)
 
 cfg = json.load(open(os.path.join(here, "..", "config", "spaces.example.json")))
-apps = ["Signal", "Slack", "Ghost", "spotify", "SLACK.desktop", ""]
+# Exercise inheritance: move shared settings up into defaults and delete them
+# from one space, so the parity check covers the merged path rather than only
+# fully explicit spaces.
+cfg["defaults"] = {"notifications": {"allowUnassigned": False},
+                   "workspaces": {"count": 10},
+                   "browser": {"command": "brave"},
+                   "apps": ["SharedApp"]}
+del cfg["spaces"][1]["browser"]["command"]
+apps = ["Signal", "Slack", "Ghost", "spotify", "SLACK.desktop", "SharedApp", ""]
 out = []
 for sid in cli.space_ids(cfg):
     for m in range(1440):
         pol = cli.resolve_policy(cfg, sid, m)
-        row = [sid, m, sorted(pol["allowFrom"]), pol["source"], bool(pol["allowUnassigned"])]
+        row = [sid, m, sorted(pol["allowFrom"]), pol["source"], bool(pol["allowUnassigned"]),
+               cli.ws_offset(cfg, sid), cli.ws_count(cfg, sid),
+               (cli.resolve_space(cfg, sid) or {}).get("browser", {}).get("command", "")]
         for a in apps:
             owner = cli.space_for_app(cfg, a)
             allowed = (bool(pol["allowUnassigned"]) if owner is None

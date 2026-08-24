@@ -192,7 +192,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.4.0, running on Omarchy 4.0.0 with no QML warnings.
+Version 0.5.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -204,7 +204,14 @@ Also verified live: switching jumps to the space's workspace range, a window
 moved with `move-to-space` lands in the target range while the rest stay put,
 and a pinned theme is applied on switch.
 
-`omarchy-spaces-config` is a GTK4 and libadwaita editor for all of it.
+`omarchy-spaces-config` is a GTK4 and libadwaita editor for all of it, with
+General, Defaults, and Keybinds pages beside the per-space ones. Keybinds are
+recorded by pressing the combination, checked for conflicts, and written to a
+delimited block in `bindings.lua`.
+
+A `defaults` block supplies values every space inherits, so a shared browser,
+schedule, or workspace count is written once. See
+[Defaults and inheritance](docs/Defaults-and-inheritance.md).
 
 The bar ships its own workspace widget so the numbers shown match the numbers
 you press. It is a second plugin directory only because Omarchy's third-party
@@ -262,9 +269,11 @@ Full docs live in [`docs/`](docs/), and are mirrored to the
 - [Installation](docs/Installation.md)
 - [Creating a space](docs/Creating-a-space.md)
 - [Editing a space](docs/Editing-a-space.md)
+- [Defaults and inheritance](docs/Defaults-and-inheritance.md)
 - [How notifications are routed](docs/How-notifications-are-routed.md)
 - [Workspaces and windows](docs/Workspaces-and-windows.md)
 - [Appearance](docs/Appearance.md)
+- [Keybinds](docs/Keybinds.md)
 - [Hotkeys](docs/Hotkeys.md)
 - [Browser and link routing](docs/Browser-and-link-routing.md)
 - [Hooks](docs/Hooks.md)

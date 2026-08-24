@@ -37,45 +37,112 @@ DEFAULT_CONFIG = r"""{
       "name": "Personal",
       "icon": "󰃜",
       "color": "#7aa2f7",
-      "browser": { "command": "brave", "profile": "Default" },
+      "browser": {
+        "command": "brave",
+        "profile": "Default"
+      },
       "email": "samy104@gmail.com",
       "assistants": {
         "claude": "personal",
         "codex": "personal"
       },
-      "apps": ["Signal", "Spotify", "Brave-browser", "org.gnome.Photos"],
+      "apps": [
+        "Signal",
+        "Spotify",
+        "Brave-browser",
+        "org.gnome.Photos"
+      ],
       "notifications": {
-        "allowFrom": ["personal", "work"],
+        "allowFrom": [
+          "personal",
+          "work"
+        ],
         "allowUnassigned": true,
         "schedule": [
-          { "from": "08:00", "to": "17:00", "allowFrom": ["personal", "work"], "label": "Work hours, everything" },
-          { "from": "17:00", "to": "22:00", "allowFrom": ["personal"], "label": "Evening, personal only" },
-          { "from": "22:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Night, silent" }
+          {
+            "from": "08:00",
+            "to": "17:00",
+            "allowFrom": [
+              "personal",
+              "work"
+            ],
+            "label": "Work hours, everything"
+          },
+          {
+            "from": "17:00",
+            "to": "22:00",
+            "allowFrom": [
+              "personal"
+            ],
+            "label": "Evening, personal only"
+          },
+          {
+            "from": "22:00",
+            "to": "08:00",
+            "allowFrom": [],
+            "allowUnassigned": false,
+            "label": "Night, silent"
+          }
         ]
-      }
+      },
+      "keybind": "SUPER + ALT + P",
+      "sendKeybind": "SUPER + ALT + SHIFT + P"
     },
     {
       "id": "work",
       "name": "HiScale",
       "icon": "󰌛",
       "color": "#9ece6a",
-      "browser": { "command": "brave", "profile": "Profile 1" },
+      "browser": {
+        "command": "brave",
+        "profile": "Profile 1"
+      },
       "email": "samy@hiscalesolutions.com",
       "assistants": {
         "claude": "work",
         "codex": "work"
       },
-      "apps": ["Slack", "zoom", "google-chrome", "Thunderbird"],
+      "apps": [
+        "Slack",
+        "zoom",
+        "google-chrome",
+        "Thunderbird"
+      ],
       "notifications": {
-        "allowFrom": ["work"],
+        "allowFrom": [
+          "work"
+        ],
         "allowUnassigned": false,
         "schedule": [
-          { "from": "08:00", "to": "18:00", "allowFrom": ["work"], "label": "Work hours" },
-          { "from": "18:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Off hours, silent" }
+          {
+            "from": "08:00",
+            "to": "18:00",
+            "allowFrom": [
+              "work"
+            ],
+            "label": "Work hours"
+          },
+          {
+            "from": "18:00",
+            "to": "08:00",
+            "allowFrom": [],
+            "allowUnassigned": false,
+            "label": "Off hours, silent"
+          }
         ]
-      }
+      },
+      "keybind": "SUPER + ALT + W",
+      "sendKeybind": "SUPER + ALT + SHIFT + W"
     }
-  ]
+  ],
+  "keybinds": {
+    "picker": "SUPER + ALT + O",
+    "next": "SUPER + ALT + N",
+    "prev": "SUPER + ALT + SHIFT + N",
+    "status": "SUPER + ALT + I",
+    "workspacePrefix": "SUPER",
+    "moveWindowPrefix": "SUPER + SHIFT"
+  }
 }
 """
 
@@ -98,6 +165,54 @@ def load_config():
     if not isinstance(cfg.get("spaces"), list) or not cfg["spaces"]:
         die("config has no spaces", 2)
     return cfg
+
+
+
+# --- defaults inheritance ----------------------------------------------------
+#
+# A top-level `defaults` object supplies values for every space. A space
+# overrides what it sets and inherits the rest, so a shared schedule, browser,
+# or workspace count is written once instead of per space.
+#
+# Objects merge recursively. Arrays and scalars are replaced whole, because a
+# half-inherited list is harder to reason about than an explicit one. Identity
+# fields are never inherited. Mirrors resolveSpace in SpacesLogic.js.
+
+IDENTITY_KEYS = ("id", "name", "icon", "color")
+
+
+def deep_merge(base, override):
+    if not isinstance(base, dict):
+        return override
+    if not isinstance(override, dict):
+        return base if override is None else override
+    out = dict(base)
+    for k, v in override.items():
+        if isinstance(out.get(k), dict) and isinstance(v, dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def resolve_space(cfg, space_id):
+    space = find_space(cfg, space_id)
+    if space is None:
+        return None
+    defaults = cfg.get("defaults")
+    if not isinstance(defaults, dict):
+        return space
+    base = {k: v for k, v in defaults.items() if k not in IDENTITY_KEYS}
+    return deep_merge(base, space)
+
+
+def inherited_keys(cfg, space_id):
+    space = find_space(cfg, space_id)
+    defaults = cfg.get("defaults")
+    if space is None or not isinstance(defaults, dict):
+        return []
+    return [k for k in defaults
+            if k not in IDENTITY_KEYS and space.get(k) is None and k not in space]
 
 
 def parse_time(value):
@@ -154,15 +269,16 @@ def space_for_app(cfg, app):
     key = normalize_app_key(app)
     if not key:
         return None
-    for s in cfg.get("spaces", []):
-        for a in normalize_list(s.get("apps")):
+    for sid in space_ids(cfg):
+        resolved = resolve_space(cfg, sid) or {}
+        for a in normalize_list(resolved.get("apps")):
             if normalize_app_key(a) == key:
-                return str(s["id"])
+                return sid
     return None
 
 
 def resolve_policy(cfg, space_id, now):
-    space = find_space(cfg, space_id)
+    space = resolve_space(cfg, space_id)
     if space is None:
         return {"allowFrom": space_ids(cfg), "source": "no-space",
                 "window": None, "allowUnassigned": True}
@@ -289,7 +405,7 @@ def cmd_cycle(cfg, args, step):
 
 def cmd_status(cfg, args):
     active = read_active(cfg)
-    space = find_space(cfg, active)
+    space = resolve_space(cfg, active)
     now = minutes_now()
     pol = resolve_policy(cfg, active, now)
     if args and args[0] == "--json":
@@ -316,7 +432,7 @@ def cmd_open(cfg, args):
         die("usage: omarchy-spaces open <url>")
     url = args[0]
     active = read_active(cfg)
-    space = find_space(cfg, active)
+    space = resolve_space(cfg, active)
     browser = (space or {}).get("browser") or {}
     if not browser.get("command"):
         os.execvp("xdg-open", ["xdg-open", url])
@@ -332,7 +448,7 @@ def cmd_which(cfg, args):
     """Print the argv that `open` would exec, without running it."""
     url = args[0] if args else "URL"
     active = read_active(cfg)
-    space = find_space(cfg, active)
+    space = resolve_space(cfg, active)
     browser = (space or {}).get("browser") or {}
     if not browser.get("command"):
         print(json.dumps(["xdg-open", url]))
@@ -351,7 +467,7 @@ def cmd_get(cfg, args):
     if not args:
         die("usage: omarchy-spaces get <email|name|icon|color|id|assistant.<tool>>")
     active = read_active(cfg)
-    space = find_space(cfg, active) or {}
+    space = resolve_space(cfg, active) or {}
     key = args[0]
     if key.startswith("assistant."):
         val = (space.get("assistants") or {}).get(key.split(".", 1)[1], "")
@@ -402,6 +518,18 @@ def cmd_validate(cfg, args):
                 problems.append("%s: %d minutes match more than one window, the first wins "
                                 "(first at %02d:%02d)" % (sid, len(overlaps),
                                                           overlaps[0] // 60, overlaps[0] % 60))
+    # With a defaults block, an app list can reach several spaces at once. The
+    # first space wins, which is fine but worth saying out loud rather than
+    # letting someone wonder why a notification went to the wrong space.
+    owners = {}
+    for sid in ids:
+        for app in normalize_list((resolve_space(cfg, sid) or {}).get("apps")):
+            owners.setdefault(normalize_app_key(app), []).append(sid)
+    for app, claimers in owners.items():
+        if len(claimers) > 1:
+            problems.append("app '%s' is claimed by %s; %s wins"
+                            % (app, " and ".join(claimers), claimers[0]))
+
     # Overlapping workspace ranges would put two spaces' windows in the same
     # place, which defeats the isolation entirely.
     if isolation_on(cfg):
@@ -470,7 +598,7 @@ def isolation_on(cfg):
 
 
 def ws_count(cfg, space_id):
-    space = find_space(cfg, space_id) or {}
+    space = resolve_space(cfg, space_id) or {}
     return int((space.get("workspaces") or {}).get("count", DEFAULT_WS_COUNT))
 
 
@@ -480,7 +608,7 @@ def ws_offset(cfg, space_id):
     An explicit offset in the config wins. Otherwise it is derived from the
     space's position in the list, so isolation works with no extra config.
     """
-    space = find_space(cfg, space_id)
+    space = resolve_space(cfg, space_id)
     if space is None:
         return 0
     ws = space.get("workspaces") or {}
@@ -1101,6 +1229,246 @@ def cmd_import(cfg, args):
     return cmd_validate(incoming, [])
 
 
+
+# --- keybinds ----------------------------------------------------------------
+#
+# Bindings live in the config and are written into a delimited block in
+# ~/.config/hypr/bindings.lua. Owning a block rather than the whole file means
+# a user's own bindings survive, and re-running replaces rather than appends.
+
+BIND_BEGIN = "-- >>> omarchy-spaces managed block, do not edit by hand"
+BIND_END = "-- <<< omarchy-spaces managed block"
+BINDINGS_PATH = os.path.join(CONFIG_HOME, "hypr", "bindings.lua")
+
+DEFAULT_KEYBINDS = {
+    "picker": "SUPER + ALT + O",
+    "next": "SUPER + ALT + N",
+    "prev": "SUPER + ALT + SHIFT + N",
+    "status": "SUPER + ALT + I",
+    "workspacePrefix": "SUPER",
+    "moveWindowPrefix": "SUPER + SHIFT",
+}
+
+KEYBIND_LABELS = {
+    "picker": "Open the Spaces picker",
+    "next": "Next space",
+    "prev": "Previous space",
+    "status": "Show the current policy",
+    "workspacePrefix": "Go to workspace slot 1 to 10",
+    "moveWindowPrefix": "Move the window to slot 1 to 10",
+}
+
+
+def keybinds(cfg):
+    out = dict(DEFAULT_KEYBINDS)
+    out.update(cfg.get("keybinds") or {})
+    return out
+
+
+def lua_quote(value):
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def keybind_block(cfg):
+    kb = keybinds(cfg)
+    lines = [BIND_BEGIN,
+             "-- Written by `omarchy-spaces keybinds install`. Edit the bindings in the",
+             "-- Omarchy Spaces app or in ~/.config/omarchy-spaces/spaces.json.",
+             ""]
+
+    def bind(combo, label, command):
+        if not combo:
+            return
+        lines.append("o.bind(%s, %s, %s)" % (lua_quote(combo), lua_quote(label), lua_quote(command)))
+
+    bind(kb.get("picker"), "Spaces picker", "omarchy menu summon spaces")
+    bind(kb.get("next"), "Next space", "omarchy-spaces next")
+    bind(kb.get("prev"), "Previous space", "omarchy-spaces prev")
+    if kb.get("status"):
+        lines.append("o.bind(%s, %s, %s)" % (
+            lua_quote(kb["status"]), lua_quote("Space status"),
+            lua_quote("bash -lc 'omarchy-notification-send \"$(omarchy-spaces status)\"'")))
+
+    lines.append("")
+    for space in cfg.get("spaces", []):
+        sid = str(space.get("id"))
+        name = space.get("name") or sid
+        if space.get("keybind"):
+            bind(space["keybind"], "Space: " + name, "omarchy-spaces switch " + sid)
+        if space.get("sendKeybind"):
+            bind(space["sendKeybind"], "Send window to " + name,
+                 "omarchy-spaces move-to-space " + sid)
+
+    if isolation_on(cfg) and (kb.get("workspacePrefix") or kb.get("moveWindowPrefix")):
+        lines.append("")
+        lines.append("-- Slots within the active space, not real workspace ids. This is what")
+        lines.append("-- keeps a second space's range reachable without inventing new keys.")
+        lines.append("for i = 1, 10 do")
+        lines.append('  local key = "code:" .. tostring(i + 9)')
+        if kb.get("workspacePrefix"):
+            wp = kb["workspacePrefix"]
+            lines.append('  hl.unbind(%s .. " + " .. key)' % lua_quote(wp))
+            lines.append('  o.bind(%s .. " + " .. key, "Workspace " .. i .. " (this space)",'
+                         % lua_quote(wp))
+            lines.append('    "omarchy-spaces workspace " .. i)')
+        if kb.get("moveWindowPrefix"):
+            mp = kb["moveWindowPrefix"]
+            lines.append('  hl.unbind(%s .. " + " .. key)' % lua_quote(mp))
+            lines.append('  o.bind(%s .. " + " .. key, "Move window to workspace " .. i .. " (this space)",'
+                         % lua_quote(mp))
+            lines.append('    "omarchy-spaces move-to-workspace " .. i)')
+        lines.append("end")
+
+    lines.append(BIND_END)
+    return "\n".join(lines)
+
+
+def strip_block(text):
+    out, skipping = [], False
+    for line in text.splitlines():
+        if line.strip() == BIND_BEGIN:
+            skipping = True
+            continue
+        if line.strip() == BIND_END:
+            skipping = False
+            continue
+        if not skipping:
+            out.append(line)
+    return "\n".join(out).rstrip() + "\n"
+
+
+def hypr_reload():
+    try:
+        subprocess.run(["hyprctl", "reload"], capture_output=True, timeout=10)
+        p = subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True, timeout=10)
+        return (p.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return str(e)
+
+
+def cmd_keybinds(cfg, args):
+    sub = args[0] if args else "show"
+
+    if sub == "show":
+        kb = keybinds(cfg)
+        for key, label in KEYBIND_LABELS.items():
+            combo = kb.get(key) or "(unset)"
+            suffix = " + 1..0" if key.endswith("Prefix") and kb.get(key) else ""
+            print("  %-34s %s%s" % (label, combo, suffix))
+        for space in cfg.get("spaces", []):
+            name = space.get("name") or space.get("id")
+            if space.get("keybind"):
+                print("  %-34s %s" % ("Switch to " + name, space["keybind"]))
+            if space.get("sendKeybind"):
+                print("  %-34s %s" % ("Send window to " + name, space["sendKeybind"]))
+        installed = os.path.exists(BINDINGS_PATH) and BIND_BEGIN in open(BINDINGS_PATH).read()
+        print()
+        print("  block installed in %s: %s" % (BINDINGS_PATH, "yes" if installed else "no"))
+        return 0
+
+    if sub == "print":
+        print(keybind_block(cfg))
+        return 0
+
+    if sub == "conflicts":
+        return report_conflicts(cfg)
+
+    if sub == "install":
+        os.makedirs(os.path.dirname(BINDINGS_PATH), exist_ok=True)
+        existing = open(BINDINGS_PATH).read() if os.path.exists(BINDINGS_PATH) else ""
+        if existing:
+            with open(BINDINGS_PATH + ".bak", "w") as fh:
+                fh.write(existing)
+        body = strip_block(existing)
+        text = body + "\n" + keybind_block(cfg) + "\n"
+        tmp = BINDINGS_PATH + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, BINDINGS_PATH)
+        print("updated %s" % BINDINGS_PATH)
+        errors = hypr_reload()
+        if errors:
+            print("hyprctl configerrors:")
+            print(errors)
+            return 1
+        print("hyprland reloaded, no config errors")
+        return 0
+
+    if sub == "remove":
+        if not os.path.exists(BINDINGS_PATH):
+            print("nothing to remove")
+            return 0
+        with open(BINDINGS_PATH) as fh:
+            text = fh.read()
+        with open(BINDINGS_PATH, "w") as fh:
+            fh.write(strip_block(text))
+        print("removed the managed block from %s" % BINDINGS_PATH)
+        hypr_reload()
+        return 0
+
+    die("usage: omarchy-spaces keybinds [show|print|install|remove|conflicts]")
+
+
+def existing_bindings():
+    """Every binding Omarchy currently knows about, normalised for comparison."""
+    try:
+        p = subprocess.run(["omarchy", "menu", "keybindings", "--print"],
+                           capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    out = {}
+    for line in (p.stdout or "").splitlines():
+        if "\u2192" not in line:
+            continue
+        combo, _, desc = line.partition("\u2192")
+        out[normalize_combo(combo)] = desc.strip()
+    return out
+
+
+def normalize_combo(combo):
+    """SUPER + ALT + O and 'SUPER ALT + O' are the same binding."""
+    parts = [p for p in str(combo).replace("+", " ").split() if p]
+    if not parts:
+        return ""
+    mods = sorted(p.upper() for p in parts[:-1])
+    return " ".join(mods + [parts[-1].upper()])
+
+
+def report_conflicts(cfg):
+    """Warn about bindings already taken by something that is not ours."""
+    current = existing_bindings()
+    ours = {}
+    kb = keybinds(cfg)
+    for key, label in KEYBIND_LABELS.items():
+        if kb.get(key) and not key.endswith("Prefix"):
+            ours[normalize_combo(kb[key])] = label
+    for space in cfg.get("spaces", []):
+        name = space.get("name") or space.get("id")
+        if space.get("keybind"):
+            ours[normalize_combo(space["keybind"])] = "Switch to " + name
+        if space.get("sendKeybind"):
+            ours[normalize_combo(space["sendKeybind"])] = "Send window to " + name
+
+    clashes = []
+    for combo, label in ours.items():
+        held = current.get(combo)
+        if held and "space" not in held.lower() and "Spaces" not in held:
+            clashes.append((combo, label, held))
+
+    seen = {}
+    for combo, label in ours.items():
+        if combo in seen:
+            clashes.append((combo, label, "also " + seen[combo]))
+        seen[combo] = label
+
+    if not clashes:
+        print("no conflicts")
+        return 0
+    for combo, label, held in clashes:
+        print("warn: %s wanted for '%s' is taken by '%s'" % (combo, label, held))
+    return 1
+
+
 MENU_BEGIN = "  // >>> omarchy-spaces managed block, do not edit by hand"
 MENU_END = "  // <<< omarchy-spaces managed block"
 MENU_PATH = os.path.join(CONFIG_HOME, "omarchy", "extensions", "omarchy-menu.jsonc")
@@ -1226,6 +1594,13 @@ Discovery and transfer
   discover <what>         browsers, profiles <cmd>, apps, themes, fonts, backgrounds
   export [path]           write the config out, stdout when no path
   import <path>           replace the config from a file, stdin when no path
+
+Keybinds
+  keybinds show           the bindings this config asks for
+  keybinds install        write them into ~/.config/hypr/bindings.lua and reload
+  keybinds remove         take the managed block back out
+  keybinds conflicts      check them against what Hyprland already has
+  keybinds print          print the Lua block without writing it
 """
 
 
@@ -1237,7 +1612,7 @@ COMMANDS = {
     "workspace": cmd_workspace, "move-to-workspace": cmd_move_to_workspace,
     "move-to-space": cmd_move_to_space, "windows": cmd_windows,
     "appearance": cmd_appearance, "discover": cmd_discover,
-    "export": cmd_export, "import": cmd_import,
+    "export": cmd_export, "import": cmd_import, "keybinds": cmd_keybinds,
 }
 
 

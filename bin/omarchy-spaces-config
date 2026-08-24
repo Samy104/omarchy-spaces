@@ -17,10 +17,19 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
 CONFIG_PATH = os.path.join(CONFIG_HOME, "omarchy-spaces", "spaces.json")
+
+DEFAULT_KEYBINDS = {
+    "picker": "SUPER + ALT + O",
+    "next": "SUPER + ALT + N",
+    "prev": "SUPER + ALT + SHIFT + N",
+    "status": "SUPER + ALT + I",
+    "workspacePrefix": "SUPER",
+    "moveWindowPrefix": "SUPER + SHIFT",
+}
 
 PALETTE = ["#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#f7768e", "#7dcfff"]
 
@@ -108,7 +117,8 @@ class Window(Adw.ApplicationWindow):
         self.selected = 0
         self.dirty = False
         self.loading = False
-        self.showing_general = False
+        self.showing_general = None
+        self.editing_defaults = False
 
         self.toast = Adw.ToastOverlay()
         self.set_content(self.toast)
@@ -134,11 +144,15 @@ class Window(Adw.ApplicationWindow):
         # spaces below it.
         self.general_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.general_list.add_css_class("navigation-sidebar")
-        general_row = Adw.ActionRow(title="General")
-        icon = Gtk.Label(label="\u2699")
-        icon.add_css_class("title-3")
-        general_row.add_prefix(icon)
-        self.general_list.append(general_row)
+        for title, subtitle, glyph in (
+                ("General", "Settings for every space", "\u2699"),
+                ("Defaults", "Inherited by every space", "\u21f2"),
+                ("Keybinds", "Hyprland bindings", "\u2328")):
+            row = Adw.ActionRow(title=title, subtitle=subtitle)
+            icon = Gtk.Label(label=glyph)
+            icon.add_css_class("title-3")
+            row.add_prefix(icon)
+            self.general_list.append(row)
         self.general_list.connect("row-selected", self.on_general_selected)
 
         heading = Gtk.Label(label="Spaces", xalign=0, margin_start=12,
@@ -338,6 +352,7 @@ class Window(Adw.ApplicationWindow):
         self.stack = Gtk.Stack()
         self.stack.add_named(self.page, "space")
         self.stack.add_named(self._build_general_page(), "general")
+        self.stack.add_named(self._build_keybinds_page(), "keybinds")
         self.stack.set_visible_child_name("space")
 
         toolbar = Adw.ToolbarView()
@@ -458,24 +473,57 @@ class Window(Adw.ApplicationWindow):
     def on_general_selected(self, _list, row):
         if row is None or self.loading:
             return
-        if self.showing_general:
+        index = row.get_index()
+        if self.showing_general == index:
             return
         self.collect()
-        self.showing_general = True
+        self.showing_general = index
         self.space_list.unselect_all()
-        self.load_general()
-        self.stack.set_visible_child_name("general")
-        self.title_widget.set_title("General")
-        self.title_widget.set_subtitle("Settings for every space")
+
+        if index == 0:
+            self.load_general()
+            self.stack.set_visible_child_name("general")
+            self.title_widget.set_title("General")
+            self.title_widget.set_subtitle("Settings for every space")
+        elif index == 1:
+            # Defaults are edited with the space editor, minus identity. They
+            # have the same shape, so duplicating the whole form would only
+            # create two places for the same bug to live.
+            self.editing_defaults = True
+            self.g_identity.set_visible(False)
+            self.load_selected()
+            self.stack.set_visible_child_name("space")
+            self.title_widget.set_title("Defaults")
+            self.title_widget.set_subtitle("Every space inherits these unless it overrides them")
+        else:
+            self.load_keybinds()
+            self.stack.set_visible_child_name("keybinds")
+            self.title_widget.set_title("Keybinds")
+            self.title_widget.set_subtitle("Written to ~/.config/hypr/bindings.lua")
 
     # --- data binding -------------------------------------------------------
 
     def current_space(self):
+        if getattr(self, "editing_defaults", False):
+            return self.cfg.setdefault("defaults", {})
         spaces = self.cfg.get("spaces", [])
         if not spaces:
             return None
         idx = max(0, min(self.selected, len(spaces) - 1))
         return spaces[idx]
+
+
+    def inherited_for(self, space_id):
+        """Which top-level keys this space takes from the defaults block."""
+        defaults = self.cfg.get("defaults")
+        if not isinstance(defaults, dict):
+            return []
+        space = next((s for s in self.cfg.get("spaces", [])
+                      if str(s.get("id")) == space_id), None)
+        if space is None:
+            return []
+        skip = ("id", "name", "icon", "color")
+        return [k for k in defaults if k not in skip and k not in space]
 
     def load_selected(self):
         space = self.current_space()
@@ -512,6 +560,27 @@ class Window(Adw.ApplicationWindow):
             offset = int(ws["offset"]) if "offset" in ws else idx * count
             self.r_ws_range.set_subtitle("real workspaces %d to %d" % (offset + 1, offset + count))
 
+            # Same widgets serve a space and the defaults block, so the copy
+            # has to stop claiming to be about "this space" on the Defaults page.
+            defaults_mode = getattr(self, "editing_defaults", False)
+            self.g_apps.set_title("Apps" if defaults_mode else "Apps owned by this space")
+            self.g_apps.set_description(
+                "Owned by any space that does not list its own."
+                if defaults_mode else
+                "Their notifications count as belonging to this space.")
+            self.g_browser.set_description(
+                "Used by any space that does not set its own."
+                if defaults_mode else
+                "Links open here while this space is active.")
+            self.g_look.set_description(
+                "Inherited by any space that pins no look of its own."
+                if defaults_mode else
+                "Applied on switch, so the active space is obvious at a glance.")
+            self.g_notif.set_description(
+                "Inherited baseline. A space overrides what it sets."
+                if defaults_mode else
+                "Baseline rules. Schedule windows below override these by time of day.")
+
             look = space.get("appearance") or {}
             fill_combo(self.r_theme, cli_json("discover", "themes"), str(look.get("theme", "")))
             fill_combo(self.r_font, cli_json("discover", "fonts"), str(look.get("font", "")))
@@ -521,7 +590,12 @@ class Window(Adw.ApplicationWindow):
             self.r_unassigned.set_active(notif.get("allowUnassigned") is not False)
             self.rebuild_allow(notif.get("allowFrom") or [])
             self.rebuild_windows(notif.get("schedule") or [])
-            self.title_widget.set_title(space.get("name") or str(space.get("id")))
+            if not defaults_mode:
+                inherited = self.inherited_for(str(space.get("id")))
+                self.title_widget.set_title(space.get("name") or str(space.get("id")))
+                self.title_widget.set_subtitle(
+                    ("inherits " + ", ".join(inherited) + " from Defaults")
+                    if inherited else CONFIG_PATH)
         finally:
             self.loading = False
 
@@ -616,7 +690,7 @@ class Window(Adw.ApplicationWindow):
     # --- collecting ---------------------------------------------------------
 
     def collect(self):
-        if self.showing_general:
+        if self.showing_general == 0:
             self.collect_general()
             return
         space = self.current_space()
@@ -708,11 +782,13 @@ class Window(Adw.ApplicationWindow):
         if row is None or self.loading:
             return
         idx = row.get_index()
-        if idx == self.selected and not self.showing_general:
+        if idx == self.selected and self.showing_general is None:
             return
-        if self.showing_general:
-            self.collect_general()
-            self.showing_general = False
+        if self.showing_general is not None:
+            self.collect()
+            self.showing_general = None
+            self.editing_defaults = False
+            self.g_identity.set_visible(True)
             self.general_list.unselect_all()
             self.stack.set_visible_child_name("space")
         else:
@@ -785,6 +861,185 @@ class Window(Adw.ApplicationWindow):
         else:
             self.notify("Saved with warnings, see Validate")
 
+
+
+    # --- keybinds -----------------------------------------------------------
+
+    KEYBIND_FIELDS = [
+        ("picker", "Open the Spaces picker", "omarchy menu summon spaces"),
+        ("next", "Next space", ""),
+        ("prev", "Previous space", ""),
+        ("status", "Show the current policy", ""),
+        ("workspacePrefix", "Workspace slot 1 to 10", "The number key is appended"),
+        ("moveWindowPrefix", "Move window to slot 1 to 10", "The number key is appended"),
+    ]
+
+    def _build_keybinds_page(self):
+        page = Adw.PreferencesPage()
+
+        self.g_binds = Adw.PreferencesGroup(
+            title="Global",
+            description="Click a binding to record a new one.")
+        self.bind_rows = {}
+        for key, label, hint in self.KEYBIND_FIELDS:
+            row = Adw.ActionRow(title=label, subtitle=hint)
+            btn = Gtk.Button(valign=Gtk.Align.CENTER)
+            btn.add_css_class("flat")
+            btn.connect("clicked", lambda _b, k=key, l=label: self.capture_bind(k, l))
+            row.add_suffix(btn)
+            row.set_activatable_widget(btn)
+            self.g_binds.add(row)
+            self.bind_rows[key] = btn
+        page.add(self.g_binds)
+
+        self.g_space_binds = Adw.PreferencesGroup(
+            title="Per space",
+            description="Switch to a space, and send the focused window to it.")
+        page.add(self.g_space_binds)
+        self.space_bind_rows = []
+
+        actions = Adw.PreferencesGroup(
+            title="Apply",
+            description="Bindings are written to a delimited block. Your own bindings "
+                        "in that file are left alone.")
+
+        check = Adw.ActionRow(title="Check for conflicts",
+                              subtitle="Against everything Hyprland already has bound")
+        check_btn = Gtk.Button(label="Check", valign=Gtk.Align.CENTER)
+        check_btn.connect("clicked", self.on_check_binds)
+        check.add_suffix(check_btn)
+
+        write = Adw.ActionRow(title="Write and reload",
+                              subtitle="Applies immediately, then reports any config errors")
+        write_btn = Gtk.Button(label="Apply", valign=Gtk.Align.CENTER)
+        write_btn.add_css_class("suggested-action")
+        write_btn.connect("clicked", self.on_write_binds)
+        write.add_suffix(write_btn)
+
+        remove = Adw.ActionRow(title="Remove the block",
+                               subtitle="Leaves Hyprland's own bindings in place")
+        remove_btn = Gtk.Button(label="Remove", valign=Gtk.Align.CENTER)
+        remove_btn.add_css_class("destructive-action")
+        remove_btn.connect("clicked",
+                           lambda _b: self.run_and_toast("keybinds", "remove"))
+        remove.add_suffix(remove_btn)
+
+        actions.add(check)
+        actions.add(write)
+        actions.add(remove)
+        page.add(actions)
+        return page
+
+    def load_keybinds(self):
+        self.loading = True
+        try:
+            kb = dict(DEFAULT_KEYBINDS)
+            kb.update(self.cfg.get("keybinds") or {})
+            for key, btn in self.bind_rows.items():
+                btn.set_label(kb.get(key) or "unset")
+
+            for row in self.space_bind_rows:
+                self.g_space_binds.remove(row)
+            self.space_bind_rows = []
+            for space in self.cfg.get("spaces", []):
+                sid = str(space.get("id"))
+                name = space.get("name") or sid
+                for field, verb in (("keybind", "Switch to "), ("sendKeybind", "Send window to ")):
+                    row = Adw.ActionRow(title=verb + name, subtitle=sid)
+                    btn = Gtk.Button(label=space.get(field) or "unset", valign=Gtk.Align.CENTER)
+                    btn.add_css_class("flat")
+                    btn.connect("clicked",
+                                lambda _b, s=space, f=field, t=verb + name: self.capture_bind(f, t, s))
+                    row.add_suffix(btn)
+                    row.set_activatable_widget(btn)
+                    self.g_space_binds.add(row)
+                    self.space_bind_rows.append(row)
+        finally:
+            self.loading = False
+
+    def capture_bind(self, key, label, space=None):
+        """Record the next chord the user presses.
+
+        Typing "SUPER + ALT + O" into a text box is the part of this that
+        nobody enjoys, so the dialog listens for a real key press instead.
+        """
+        dialog = Adw.MessageDialog(
+            transient_for=self, heading=label,
+            body="Press the combination now.\nEscape cancels, Backspace clears it.")
+        dialog.add_response("cancel", "Cancel")
+
+        MODS = [(Gdk.ModifierType.SUPER_MASK, "SUPER"),
+                (Gdk.ModifierType.CONTROL_MASK, "CTRL"),
+                (Gdk.ModifierType.ALT_MASK, "ALT"),
+                (Gdk.ModifierType.SHIFT_MASK, "SHIFT")]
+        IGNORED = {Gdk.KEY_Super_L, Gdk.KEY_Super_R, Gdk.KEY_Control_L, Gdk.KEY_Control_R,
+                   Gdk.KEY_Alt_L, Gdk.KEY_Alt_R, Gdk.KEY_Shift_L, Gdk.KEY_Shift_R,
+                   Gdk.KEY_ISO_Level3_Shift, Gdk.KEY_Meta_L, Gdk.KEY_Meta_R}
+
+        def on_key(_c, keyval, _code, state):
+            if keyval == Gdk.KEY_Escape:
+                dialog.close()
+                return True
+            if keyval in IGNORED:
+                return True
+
+            if keyval == Gdk.KEY_BackSpace:
+                combo = ""
+            else:
+                parts = [name for mask, name in MODS if state & mask]
+                # A prefix binding is only modifiers, the number key is added
+                # by the generated Lua loop.
+                if key.endswith("Prefix"):
+                    if not parts:
+                        return True
+                    combo = " + ".join(parts)
+                else:
+                    name = Gdk.keyval_name(Gdk.keyval_to_upper(keyval))
+                    if not name:
+                        return True
+                    combo = " + ".join(parts + [name.upper()])
+
+            if space is not None:
+                if combo:
+                    space[key] = combo
+                else:
+                    space.pop(key, None)
+            else:
+                binds = self.cfg.setdefault("keybinds", {})
+                if combo:
+                    binds[key] = combo
+                else:
+                    binds.pop(key, None)
+
+            self.dirty = True
+            dialog.close()
+            self.load_keybinds()
+            return True
+
+        controller = Gtk.EventControllerKey()
+        controller.connect("key-pressed", on_key)
+        dialog.add_controller(controller)
+        dialog.present()
+
+    def on_check_binds(self, _b):
+        save_config(self.cfg)
+        code, out = run_cli("keybinds", "conflicts")
+        d = Adw.MessageDialog(transient_for=self,
+                              heading="No conflicts" if code == 0 else "Conflicts",
+                              body=out or "No output")
+        d.add_response("ok", "Close")
+        d.present()
+
+    def on_write_binds(self, _b):
+        save_config(self.cfg)
+        code, out = run_cli("keybinds", "install")
+        if code == 0:
+            self.notify("Bindings applied, Hyprland reloaded")
+        else:
+            d = Adw.MessageDialog(transient_for=self, heading="Hyprland reported errors",
+                                  body=out or "No output")
+            d.add_response("ok", "Close")
+            d.present()
 
     # --- profiles, apps, transfer -------------------------------------------
 

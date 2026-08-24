@@ -1871,6 +1871,7 @@ def run_startup(cfg, space_id, only_slot=None, force=False, verbose=True):
         return 0
 
     offset = ws_offset(cfg, space_id)
+    count = ws_count(cfg, space_id)
     started = 0
     for entry_slot in slots:
         if only_slot is not None and entry_slot["slot"] != only_slot:
@@ -1882,7 +1883,16 @@ def run_startup(cfg, space_id, only_slot=None, force=False, verbose=True):
 
         real = offset + entry_slot["slot"]
         existing = {c["address"] for c in clients_on(real) if c.get("address")}
-        present = {normalize_app_key(c.get("class")) for c in clients_on(real)}
+
+        # Look across the whole space, not just this slot. An app already open
+        # on another of this space's workspaces should not be launched again:
+        # moving an entry between slots would otherwise leave you with two, and
+        # single-instance apps just raise the window they already have, so the
+        # second launch produces nothing but confusion.
+        present = set()
+        for probe in range(1, count + 1):
+            for c in clients_on(offset + probe):
+                present.add(normalize_app_key(c.get("class")))
         opened = []
 
         # Focus the slot first so anything without a window rule lands here.
@@ -1894,7 +1904,8 @@ def run_startup(cfg, space_id, only_slot=None, force=False, verbose=True):
                 continue
             if e["match"] and normalize_app_key(e["match"]) in present:
                 if verbose:
-                    print("  slot %d: %s already open" % (entry_slot["slot"], e["name"]))
+                    print("  slot %d: %s already open in this space"
+                          % (entry_slot["slot"], e["name"]))
                 continue
             if verbose:
                 print("  slot %d: launching %s" % (entry_slot["slot"], e["name"]))
@@ -1906,6 +1917,8 @@ def run_startup(cfg, space_id, only_slot=None, force=False, verbose=True):
             if addr:
                 existing.add(addr)
                 opened.append(addr)
+                if e["match"]:
+                    present.add(normalize_app_key(e["match"]))
                 started += 1
             elif verbose:
                 print("  slot %d: %s did not open a window in time"

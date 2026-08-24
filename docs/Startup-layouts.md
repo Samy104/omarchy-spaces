@@ -27,7 +27,9 @@ Startup section on a space has the same thing as "Capture this workspace".
 Capture is best effort, and it is worth knowing where the effort runs out.
 
 **Ordinary apps** are recovered exactly. `/proc/<pid>/cmdline` is the command
-that started them.
+that started them. Capture records the path it finds, which for a wrapper
+script is the real binary underneath. Replacing it with the wrapper name is
+usually better, since the wrapper carries the flags and survives a reinstall.
 
 **Browser app windows** are rebuilt. A window opened with `--app=<url>` carries
 the host and the profile in its window class, so the command can be
@@ -65,8 +67,15 @@ omarchy-spaces startup run work 3       # one slot
 ```
 
 Running it twice does not open anything twice. Each entry can carry a `match`,
-a window class, and an entry whose window is already on that slot is skipped.
-Capture fills `match` in for you.
+a window class, and an entry is skipped when a window of that class is already
+open **anywhere in the space**, not just on the slot the entry names. Capture
+fills `match` in for you.
+
+The wider check matters more than it sounds. Move an entry from slot 4 to slot
+3 and a per-slot check would open a second copy, because nothing is on slot 3
+yet. It also covers single-instance apps: launching a second t3code just raises
+the window it already has, so a per-slot check would wait for a window that
+never arrives and report a failure that is not one.
 
 The Startup section also has a Run button per workspace.
 

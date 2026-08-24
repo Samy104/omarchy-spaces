@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.samy104.omarchy-spaces",
   "name": "Omarchy Spaces",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "Samy Lemcelli",
   "description": "Context spaces for Omarchy. Each space owns its browser profile, email, assistant accounts, and notification policy.",
   "kinds": [

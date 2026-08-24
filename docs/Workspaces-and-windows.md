@@ -35,12 +35,35 @@ what keeps the higher ranges reachable without inventing keys for 11 to 20.
 | SUPER + SHIFT + 1 to 0 | Move the focused window to that slot |
 | SUPER + ALT + SHIFT + P | Send the focused window to personal |
 | SUPER + ALT + SHIFT + W | Send the focused window to work |
+| SUPER + CTRL + ←/→ | Previous / next workspace, inside this space |
+| SUPER + CTRL + SHIFT + ←/→ | Move the window there |
 
 `SUPER + SHIFT + 1` in work moves the window to real workspace 11. The same
 keystroke in personal moves it to real workspace 1.
 
 These replace Omarchy's own `SUPER+1..0` and `SUPER+SHIFT+1..0`, so
 `hypr/spaces.lua` unbinds them first.
+
+## Relative navigation stays in range
+
+`SUPER + CTRL + arrows` steps to the next or previous workspace **within the
+active space**, wrapping at the ends of its range. In work, going back from
+slot 1 lands on slot 10, real workspace 20, rather than escaping into personal.
+
+Do not use Hyprland's `e+1` and `e-1` for this. They walk every workspace on
+the machine and know nothing about ranges, so from work's real workspace 11 the
+previous workspace is real 6 or wherever personal last had a window. That was
+the original behaviour here and it is exactly the bug.
+
+```bash
+omarchy-spaces workspace next
+omarchy-spaces workspace prev
+omarchy-spaces move-to-workspace next
+```
+
+Occupied slots are preferred, the way `e+1` skips empty workspaces, so
+navigation does not trudge through unused slots. When nothing else in the range
+holds a window it steps by one instead.
 
 ## Moving a window that opened in the wrong space
 

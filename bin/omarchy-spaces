@@ -936,15 +936,59 @@ def arg_value(args, flag):
     return None
 
 
+def occupied_slots(cfg, space_id):
+    """Slots of a space that currently hold windows."""
+    data = hypr_json("workspaces") or []
+    offset = ws_offset(cfg, space_id)
+    count = ws_count(cfg, space_id)
+    out = set()
+    for w in data:
+        try:
+            slot = int(w["id"]) - offset
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 1 <= slot <= count and int(w.get("windows", 0)) > 0:
+            out.add(slot)
+    return out
+
+
+def relative_slot(cfg, space_id, step):
+    """The next or previous slot within a space, wrapping inside its range.
+
+    Hyprland's own e+1 and e-1 walk every workspace on the machine, which is
+    why plain relative navigation escapes into another space's range. This
+    stays inside the active space.
+
+    Occupied slots are preferred, matching what e+1 does, so navigation skips
+    the empty ones. When nothing else is occupied it falls back to a plain
+    step so the keys still do something.
+    """
+    count = ws_count(cfg, space_id)
+    offset = ws_offset(cfg, space_id)
+    current = read_slot(space_id)
+    real = current_real_ws()
+    if real is not None and 1 <= real - offset <= count:
+        current = real - offset
+
+    occupied = sorted(occupied_slots(cfg, space_id) | {current})
+    if len(occupied) > 1:
+        i = occupied.index(current) if current in occupied else 0
+        return occupied[(i + step) % len(occupied)]
+    return ((current - 1 + step) % count) + 1
+
+
 def cmd_workspace(cfg, args):
     """Go to slot N of the active space's range."""
     if not args:
-        die("usage: omarchy-spaces workspace <n>")
-    try:
-        n = int(args[0])
-    except ValueError:
-        die("workspace takes a number")
+        die("usage: omarchy-spaces workspace <n|next|prev>")
     active = read_active(cfg)
+    if args[0] in ("next", "prev"):
+        n = relative_slot(cfg, active, 1 if args[0] == "next" else -1)
+    else:
+        try:
+            n = int(args[0])
+        except ValueError:
+            die("workspace takes a number, or next or prev")
     count = ws_count(cfg, active)
     if not (1 <= n <= count):
         die("space '%s' has slots 1 to %d" % (active, count))
@@ -959,12 +1003,15 @@ def cmd_workspace(cfg, args):
 def cmd_move_to_workspace(cfg, args):
     """Move the focused window to slot N of the active space, and follow it."""
     if not args:
-        die("usage: omarchy-spaces move-to-workspace <n>")
-    try:
-        n = int(args[0])
-    except ValueError:
-        die("move-to-workspace takes a number")
+        die("usage: omarchy-spaces move-to-workspace <n|next|prev>")
     active = read_active(cfg)
+    if args[0] in ("next", "prev"):
+        n = relative_slot(cfg, active, 1 if args[0] == "next" else -1)
+    else:
+        try:
+            n = int(args[0])
+        except ValueError:
+            die("move-to-workspace takes a number, or next or prev")
     count = ws_count(cfg, active)
     if not (1 <= n <= count):
         die("space '%s' has slots 1 to %d" % (active, count))
@@ -1356,6 +1403,10 @@ BIND_END = "-- <<< omarchy-spaces managed block"
 BINDINGS_PATH = os.path.join(CONFIG_HOME, "hypr", "bindings.lua")
 
 DEFAULT_KEYBINDS = {
+    "workspaceNext": "SUPER + CTRL + RIGHT",
+    "workspacePrev": "SUPER + CTRL + LEFT",
+    "moveWindowNext": "SUPER + CTRL + SHIFT + RIGHT",
+    "moveWindowPrev": "SUPER + CTRL + SHIFT + LEFT",
     "picker": "SUPER + ALT + O",
     "next": "SUPER + ALT + N",
     "prev": "SUPER + ALT + SHIFT + N",
@@ -1365,6 +1416,10 @@ DEFAULT_KEYBINDS = {
 }
 
 KEYBIND_LABELS = {
+    "workspaceNext": "Next workspace in this space",
+    "workspacePrev": "Previous workspace in this space",
+    "moveWindowNext": "Move window to the next workspace",
+    "moveWindowPrev": "Move window to the previous workspace",
     "picker": "Open the Spaces picker",
     "next": "Next space",
     "prev": "Previous space",
@@ -1395,6 +1450,22 @@ def keybind_block(cfg):
         if not combo:
             return
         lines.append("o.bind(%s, %s, %s)" % (lua_quote(combo), lua_quote(label), lua_quote(command)))
+
+    # Relative navigation, scoped to the active space. Hyprland's own e+1 and
+    # e-1 walk every workspace on the machine, so a plain relative binding
+    # escapes into another space's range. Unbind first: these keys usually
+    # already hold something.
+    for key, label, command in (
+            ("workspaceNext", "Next workspace (this space)", "omarchy-spaces workspace next"),
+            ("workspacePrev", "Previous workspace (this space)", "omarchy-spaces workspace prev"),
+            ("moveWindowNext", "Move window to next workspace (this space)",
+             "omarchy-spaces move-to-workspace next"),
+            ("moveWindowPrev", "Move window to previous workspace (this space)",
+             "omarchy-spaces move-to-workspace prev")):
+        combo = kb.get(key)
+        if combo:
+            lines.append("hl.unbind(%s)" % lua_quote(combo))
+            bind(combo, label, command)
 
     bind(kb.get("picker"), "Spaces picker", "omarchy menu summon spaces")
     bind(kb.get("next"), "Next space", "omarchy-spaces next")
@@ -1773,8 +1844,9 @@ USAGE = """omarchy-spaces, context spaces for Omarchy
   menu                    print the menu rows without writing anything
 
 Windows
-  workspace <n>           go to slot n of the active space
-  move-to-workspace <n>   move the focused window to slot n [--stay]
+  workspace <n|next|prev> go to a slot of the active space, staying in range
+  move-to-workspace <n|next|prev>
+                          move the focused window to a slot [--stay]
   move-to-space <id> [n]  send the focused window to another space [--follow]
                           [--address 0x..] targets one window instead of the focused one
   windows                 list open windows grouped by space

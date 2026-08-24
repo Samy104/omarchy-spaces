@@ -15,6 +15,8 @@ matters is whether a work message should interrupt your evening.
 - [Creating a space](Creating-a-space)
 - [Editing a space](Editing-a-space)
 - [How notifications are routed](How-notifications-are-routed)
+- [Workspaces and windows](Workspaces-and-windows)
+- [Appearance](Appearance)
 - [Hotkeys](Hotkeys)
 - [Browser and link routing](Browser-and-link-routing)
 - [CLI reference](CLI-reference)
@@ -33,6 +35,19 @@ profile picker in between.
 
 Accounts. Each space carries an email address and a set of assistant accounts,
 readable by scripts through `omarchy-spaces get`.
+
+Windows. Each space owns a range of real Hyprland workspaces, so the same
+keystroke reaches different windows depending on the space. See
+[Workspaces and windows](Workspaces-and-windows).
+
+Appearance. A space can pin a theme, font, and background, applied on switch so
+the active context is obvious. See [Appearance](Appearance).
+
+## Configuration app
+
+`omarchy-spaces-config` is a GTK4 editor for everything below. It appears in
+your launcher as "Omarchy Spaces". Editing `spaces.json` by hand works equally
+well.
 
 ## Two files
 

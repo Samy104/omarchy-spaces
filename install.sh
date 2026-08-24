@@ -19,6 +19,16 @@ say "installing CLI to $BIN_DIR/omarchy-spaces"
 mkdir -p "$BIN_DIR"
 install -m 0755 "$REPO_DIR/bin/omarchy-spaces" "$BIN_DIR/omarchy-spaces"
 
+if python3 -c "import gi; gi.require_version('Adw','1')" 2>/dev/null; then
+  say "installing the config app"
+  install -m 0755 "$REPO_DIR/bin/omarchy-spaces-config" "$BIN_DIR/omarchy-spaces-config"
+  mkdir -p "$APP_DIR"
+  install -m 0644 "$REPO_DIR/share/omarchy-spaces-config.desktop" "$APP_DIR/"
+  update-desktop-database "$APP_DIR" 2>/dev/null || true
+else
+  say "skipping the config app, install python-gobject and libadwaita for it"
+fi
+
 if [ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-spaces/spaces.json" ]; then
   say "writing starter config"
   "$BIN_DIR/omarchy-spaces" init

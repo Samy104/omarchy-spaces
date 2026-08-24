@@ -14,6 +14,16 @@ omarchy-spaces validate             check for gaps, overlaps, bad references
 omarchy-spaces install-menu         add the space rows to the Omarchy menu
 omarchy-spaces remove-menu          take them back out
 omarchy-spaces menu                 print the rows without writing anything
+
+omarchy-spaces workspace <n>            go to slot n of the active space
+omarchy-spaces move-to-workspace <n>    move the focused window to slot n
+omarchy-spaces move-to-space <id> [n]   send the focused window to another space
+omarchy-spaces windows                  list open windows grouped by space
+
+omarchy-spaces appearance show          pinned look vs the live one
+omarchy-spaces appearance capture       save the current theme, font, background
+omarchy-spaces appearance apply         re-apply the pinned look
+omarchy-spaces appearance clear         stop pinning a look
 ```
 
 ## get

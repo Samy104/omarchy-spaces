@@ -15,6 +15,10 @@ validates it.
 
 Everything lands under `$HOME`. No sudo, nothing system wide.
 
+`install.sh` also installs the GTK4 config app when python-gobject and
+libadwaita are present. It shows up in your launcher as "Omarchy Spaces", or run
+`omarchy-spaces-config`.
+
 ## Enable the bar widget
 
 ```bash
@@ -76,8 +80,9 @@ spaces that do not exist. `status` prints the policy in effect right now.
 omarchy plugin disable spaces.omarchy-spaces
 omarchy-spaces remove-menu
 rm -rf ~/.config/omarchy/plugins/spaces.omarchy-spaces
-rm -f ~/.local/bin/omarchy-spaces
+rm -f ~/.local/bin/omarchy-spaces ~/.local/bin/omarchy-spaces-config
 rm -f ~/.local/share/applications/omarchy-spaces-open.desktop
+rm -f ~/.local/share/applications/omarchy-spaces-config.desktop
 ```
 
 Your config at `~/.config/omarchy-spaces/` is left in place. Delete it if you

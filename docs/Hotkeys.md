@@ -34,6 +34,34 @@ hyprctl configerrors
 
 An empty `configerrors` means it took.
 
+## Workspaces
+
+The numbers are slots within the active space, not real workspace ids, which is
+how the higher ranges stay reachable. See
+[Workspaces and windows](Workspaces-and-windows).
+
+| Keys | Action |
+|---|---|
+| SUPER + 1 to 0 | Go to slot 1 to 10 of the active space |
+| SUPER + SHIFT + 1 to 0 | Move the focused window to that slot |
+| SUPER + ALT + SHIFT + P | Send the focused window to personal |
+| SUPER + ALT + SHIFT + W | Send the focused window to work |
+
+These replace Omarchy's own `SUPER+1..0` and `SUPER+SHIFT+1..0`, so the snippet
+in `hypr/spaces.lua` unbinds them first:
+
+```lua
+for i = 1, 10 do
+  local key = "code:" .. tostring(i + 9)
+  hl.unbind("SUPER + " .. key)
+  hl.unbind("SUPER + SHIFT + " .. key)
+  o.bind("SUPER + " .. key, "Workspace " .. i .. " (this space)",
+    "omarchy-spaces workspace " .. i)
+  o.bind("SUPER + SHIFT + " .. key, "Move window to workspace " .. i .. " (this space)",
+    "omarchy-spaces move-to-workspace " .. i)
+end
+```
+
 ## Adding a key for a new space
 
 One line per space, pointing at the space `id`:

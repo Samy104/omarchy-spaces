@@ -24,6 +24,13 @@ work one, with no profile picker in between.
 Which accounts apply. Each space carries an email address and a set of
 assistant accounts, readable by scripts through `omarchy-spaces get`.
 
+Which windows you see. Each space owns a range of real Hyprland workspaces, so
+SUPER+1 reaches different windows depending on the space. Windows never move on
+a switch, which keeps it instant.
+
+What the desktop looks like. A space can pin a theme, font, and background,
+applied on switch.
+
 ## Notification policy
 
 Each space declares which spaces' notifications it will show, and a schedule
@@ -185,7 +192,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.1.1, running on Omarchy 4.0.0 with no QML warnings.
+Version 0.2.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -193,9 +200,14 @@ active, a work-app notification still gets through, and both land in history
 either way. The policy engine, CLI, browser routing, hooks, menu picker, and
 config validation are covered by the test suite.
 
-Not built yet. There is no in-shell editor for the schedule, so changing rules
-means editing `spaces.json`. A custom panel would need its own Wayland layer
-window, and the Omarchy menu already gives a good picker, so that is parked.
+Also verified live: switching jumps to the space's workspace range, a window
+moved with `move-to-space` lands in the target range while the rest stay put,
+and a pinned theme is applied on switch.
+
+`omarchy-spaces-config` is a GTK4 and libadwaita editor for all of it.
+
+Known rough edge. Omarchy's workspace widget shows real workspace ids, so in the
+work space the bar reads 11 to 20 while you press 1 to 0.
 
 ## Documentation
 
@@ -206,6 +218,8 @@ Full docs live in [`docs/`](docs/), and are mirrored to the
 - [Creating a space](docs/Creating-a-space.md)
 - [Editing a space](docs/Editing-a-space.md)
 - [How notifications are routed](docs/How-notifications-are-routed.md)
+- [Workspaces and windows](docs/Workspaces-and-windows.md)
+- [Appearance](docs/Appearance.md)
 - [Hotkeys](docs/Hotkeys.md)
 - [Browser and link routing](docs/Browser-and-link-routing.md)
 - [Hooks](docs/Hooks.md)

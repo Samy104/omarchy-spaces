@@ -9,6 +9,8 @@
 
 **Behaviour**
 - [How notifications are routed](How-notifications-are-routed)
+- [Workspaces and windows](Workspaces-and-windows)
+- [Appearance](Appearance)
 - [Browser and link routing](Browser-and-link-routing)
 - [Hotkeys](Hotkeys)
 - [Hooks](Hooks)

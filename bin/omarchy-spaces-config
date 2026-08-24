@@ -1,0 +1,617 @@
+#!/usr/bin/env python3
+"""Omarchy Spaces configuration app.
+
+A GTK4 and libadwaita editor for ~/.config/omarchy-spaces/spaces.json.
+
+Everything here is presentation. The policy rules live in bin/omarchy-spaces
+and SpacesLogic.js, and this app shells out to `omarchy-spaces validate` rather
+than reimplementing the checks a third time.
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+
+CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+CONFIG_PATH = os.path.join(CONFIG_HOME, "omarchy-spaces", "spaces.json")
+
+PALETTE = ["#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#f7768e", "#7dcfff"]
+
+
+def run_cli(*args):
+    try:
+        p = subprocess.run(["omarchy-spaces", *args], capture_output=True, text=True, timeout=15)
+        return p.returncode, (p.stdout + p.stderr).strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, str(e)
+
+
+def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        run_cli("init")
+    try:
+        with open(CONFIG_PATH) as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {"version": 1, "activeSpace": "", "criticalBypass": True, "spaces": []}
+
+
+def save_config(cfg):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, CONFIG_PATH)
+
+
+def unique_id(cfg, base="space"):
+    existing = {str(s.get("id")) for s in cfg.get("spaces", [])}
+    if base not in existing:
+        return base
+    n = 2
+    while "%s%d" % (base, n) in existing:
+        n += 1
+    return "%s%d" % (base, n)
+
+
+class Window(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Omarchy Spaces")
+        self.set_default_size(940, 720)
+
+        self.cfg = load_config()
+        self.selected = 0
+        self.dirty = False
+        self.loading = False
+
+        self.toast = Adw.ToastOverlay()
+        self.set_content(self.toast)
+
+        self.split = Adw.NavigationSplitView(min_sidebar_width=240, max_sidebar_width=300)
+        self.toast.set_child(self.split)
+
+        self.split.set_sidebar(self._build_sidebar())
+        self.split.set_content(self._build_content())
+
+        self.refresh_sidebar()
+        self.load_selected()
+
+    # --- sidebar ------------------------------------------------------------
+
+    def _build_sidebar(self):
+        self.space_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        self.space_list.add_css_class("navigation-sidebar")
+        self.space_list.connect("row-selected", self.on_space_selected)
+
+        scroll = Gtk.ScrolledWindow(vexpand=True, child=self.space_list)
+
+        add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add a space")
+        add.connect("clicked", self.on_add_space)
+        remove = Gtk.Button(icon_name="list-remove-symbolic", tooltip_text="Remove this space")
+        remove.connect("clicked", self.on_remove_space)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_top=6,
+                          margin_bottom=6, margin_start=6, margin_end=6)
+        actions.append(add)
+        actions.append(remove)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(scroll)
+        box.append(Gtk.Separator())
+        box.append(actions)
+
+        header = Adw.HeaderBar()
+        header.set_title_widget(Adw.WindowTitle(title="Spaces"))
+
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(header)
+        toolbar.set_content(box)
+
+        return Adw.NavigationPage(title="Spaces", child=toolbar)
+
+    def refresh_sidebar(self):
+        while (row := self.space_list.get_row_at_index(0)) is not None:
+            self.space_list.remove(row)
+        active_code, active = run_cli("current")
+        active = active.strip() if active_code == 0 else ""
+        for space in self.cfg.get("spaces", []):
+            row = Adw.ActionRow(title=space.get("name") or space.get("id"),
+                                subtitle=str(space.get("id")))
+            icon = Gtk.Label(label=space.get("icon") or "●")
+            icon.add_css_class("title-3")
+            row.add_prefix(icon)
+            if str(space.get("id")) == active:
+                badge = Gtk.Label(label="active")
+                badge.add_css_class("dim-label")
+                badge.add_css_class("caption")
+                row.add_suffix(badge)
+            self.space_list.append(row)
+        target = self.space_list.get_row_at_index(self.selected)
+        if target:
+            self.space_list.select_row(target)
+
+    # --- content ------------------------------------------------------------
+
+    def _build_content(self):
+        self.page = Adw.PreferencesPage()
+
+        self.g_identity = Adw.PreferencesGroup(title="Identity")
+        self.r_id = Adw.EntryRow(title="Id")
+        self.r_id.set_tooltip_text("Used by hotkeys, allowFrom, and the CLI. Renaming means "
+                                   "updating those too.")
+        self.r_name = Adw.EntryRow(title="Name")
+        self.r_icon = Adw.EntryRow(title="Icon")
+        self.r_icon.set_tooltip_text("A Nerd Font glyph. Paste it directly.")
+        self.r_color = Adw.EntryRow(title="Color")
+        for r in (self.r_id, self.r_name, self.r_icon, self.r_color):
+            r.connect("changed", self.on_field_changed)
+            self.g_identity.add(r)
+        self.page.add(self.g_identity)
+
+        self.g_browser = Adw.PreferencesGroup(
+            title="Browser",
+            description="Links open here while this space is active.")
+        self.r_bcmd = Adw.EntryRow(title="Command")
+        self.r_bprofile = Adw.EntryRow(title="Profile directory")
+        self.r_bprofile.set_tooltip_text("The directory name on disk, such as Default or "
+                                         "Profile 1. Not the display name.")
+        for r in (self.r_bcmd, self.r_bprofile):
+            r.connect("changed", self.on_field_changed)
+            self.g_browser.add(r)
+        self.page.add(self.g_browser)
+
+        self.g_accounts = Adw.PreferencesGroup(title="Accounts")
+        self.r_email = Adw.EntryRow(title="Email")
+        self.r_claude = Adw.EntryRow(title="Assistant: claude")
+        self.r_codex = Adw.EntryRow(title="Assistant: codex")
+        for r in (self.r_email, self.r_claude, self.r_codex):
+            r.connect("changed", self.on_field_changed)
+            self.g_accounts.add(r)
+        self.page.add(self.g_accounts)
+
+        self.g_apps = Adw.PreferencesGroup(
+            title="Apps owned by this space",
+            description="Comma separated. Matched against the app name a program sends, "
+                        "case insensitively.")
+        self.r_apps = Adw.EntryRow(title="Apps")
+        self.r_apps.connect("changed", self.on_field_changed)
+        self.g_apps.add(self.r_apps)
+        self.page.add(self.g_apps)
+
+        self.g_ws = Adw.PreferencesGroup(
+            title="Workspaces",
+            description="Each space owns a range of real Hyprland workspaces. "
+                        "SUPER+1 means slot 1 of whichever space is active.")
+        self.r_ws_range = Adw.ActionRow(title="Range", subtitle="")
+        self.r_ws_count = Adw.SpinRow.new_with_range(1, 20, 1)
+        self.r_ws_count.set_title("Slots")
+        self.r_ws_count.connect("notify::value", self.on_field_changed)
+        self.r_ws_offset = Adw.EntryRow(title="Offset override")
+        self.r_ws_offset.set_tooltip_text("Leave empty to derive it from the space's "
+                                          "position in the list.")
+        self.r_ws_offset.connect("changed", self.on_field_changed)
+        self.g_ws.add(self.r_ws_range)
+        self.g_ws.add(self.r_ws_count)
+        self.g_ws.add(self.r_ws_offset)
+        self.page.add(self.g_ws)
+
+        self.g_look = Adw.PreferencesGroup(
+            title="Appearance",
+            description="Applied on switch, so the active space is obvious at a glance.")
+        capture = Gtk.Button(label="Capture current", valign=Gtk.Align.CENTER)
+        capture.add_css_class("flat")
+        capture.connect("clicked", self.on_capture_look)
+        self.g_look.set_header_suffix(capture)
+        self.r_theme = Adw.EntryRow(title="Theme")
+        self.r_font = Adw.EntryRow(title="Font")
+        self.r_bg = Adw.EntryRow(title="Background")
+        self.r_bg.set_tooltip_text("A filename from the theme's backgrounds folder, "
+                                   "or an absolute path to any image.")
+        for r in (self.r_theme, self.r_font, self.r_bg):
+            r.connect("changed", self.on_field_changed)
+            self.g_look.add(r)
+        self.page.add(self.g_look)
+
+        self.g_notif = Adw.PreferencesGroup(
+            title="Notifications",
+            description="Baseline rules. Schedule windows below override these by time of day.")
+        self.r_unassigned = Adw.SwitchRow(
+            title="Show apps in no space",
+            subtitle="Anything not listed under any space's apps")
+        self.r_unassigned.connect("notify::active", self.on_field_changed)
+        self.g_notif.add(self.r_unassigned)
+        self.page.add(self.g_notif)
+
+        self.g_allow = Adw.PreferencesGroup(title="Show notifications from")
+        self.page.add(self.g_allow)
+        self.allow_switches = {}
+
+        self.g_sched = Adw.PreferencesGroup(title="Schedule")
+        add_win = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add a window",
+                             valign=Gtk.Align.CENTER)
+        add_win.add_css_class("flat")
+        add_win.connect("clicked", self.on_add_window)
+        self.g_sched.set_header_suffix(add_win)
+        self.page.add(self.g_sched)
+        self.window_rows = []
+
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", self.on_save)
+
+        validate = Gtk.Button(label="Validate")
+        validate.connect("clicked", self.on_validate)
+
+        header = Adw.HeaderBar()
+        self.title_widget = Adw.WindowTitle(title="Omarchy Spaces", subtitle=CONFIG_PATH)
+        header.set_title_widget(self.title_widget)
+        header.pack_end(save)
+        header.pack_end(validate)
+
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(header)
+        toolbar.set_content(self.page)
+        return Adw.NavigationPage(title="Edit", child=toolbar)
+
+    # --- data binding -------------------------------------------------------
+
+    def current_space(self):
+        spaces = self.cfg.get("spaces", [])
+        if not spaces:
+            return None
+        idx = max(0, min(self.selected, len(spaces) - 1))
+        return spaces[idx]
+
+    def load_selected(self):
+        space = self.current_space()
+        self.loading = True
+        try:
+            if space is None:
+                for r in (self.r_id, self.r_name, self.r_icon, self.r_color, self.r_bcmd,
+                          self.r_bprofile, self.r_email, self.r_claude, self.r_codex,
+                          self.r_apps, self.r_theme, self.r_font, self.r_bg, self.r_ws_offset):
+                    r.set_text("")
+                self.rebuild_allow([])
+                self.rebuild_windows([])
+                return
+            self.r_id.set_text(str(space.get("id", "")))
+            self.r_name.set_text(str(space.get("name", "")))
+            self.r_icon.set_text(str(space.get("icon", "")))
+            self.r_color.set_text(str(space.get("color", "")))
+            browser = space.get("browser") or {}
+            self.r_bcmd.set_text(str(browser.get("command", "")))
+            self.r_bprofile.set_text(str(browser.get("profile", "")))
+            self.r_email.set_text(str(space.get("email", "")))
+            assistants = space.get("assistants") or {}
+            self.r_claude.set_text(str(assistants.get("claude", "")))
+            self.r_codex.set_text(str(assistants.get("codex", "")))
+            self.r_apps.set_text(", ".join(space.get("apps") or []))
+            ws = space.get("workspaces") or {}
+            count = int(ws.get("count", 10))
+            self.r_ws_count.set_value(count)
+            self.r_ws_offset.set_text(str(ws["offset"]) if "offset" in ws else "")
+            idx = self.selected
+            offset = int(ws["offset"]) if "offset" in ws else idx * count
+            self.r_ws_range.set_subtitle("real workspaces %d to %d" % (offset + 1, offset + count))
+
+            look = space.get("appearance") or {}
+            self.r_theme.set_text(str(look.get("theme", "")))
+            self.r_font.set_text(str(look.get("font", "")))
+            self.r_bg.set_text(str(look.get("background", "")))
+
+            notif = space.get("notifications") or {}
+            self.r_unassigned.set_active(notif.get("allowUnassigned") is not False)
+            self.rebuild_allow(notif.get("allowFrom") or [])
+            self.rebuild_windows(notif.get("schedule") or [])
+            self.title_widget.set_title(space.get("name") or str(space.get("id")))
+        finally:
+            self.loading = False
+
+    def rebuild_allow(self, allowed):
+        for row in list(self.allow_switches.values()):
+            self.g_allow.remove(row)
+        self.allow_switches = {}
+        for other in self.cfg.get("spaces", []):
+            sid = str(other.get("id"))
+            row = Adw.SwitchRow(title=other.get("name") or sid, subtitle=sid)
+            row.set_active(sid in allowed)
+            row.connect("notify::active", self.on_field_changed)
+            self.g_allow.add(row)
+            self.allow_switches[sid] = row
+
+    def rebuild_windows(self, windows):
+        for row in self.window_rows:
+            self.g_sched.remove(row["row"])
+        self.window_rows = []
+        for win in windows:
+            self.add_window_row(win)
+        if not windows:
+            placeholder = Adw.ActionRow(
+                title="No windows",
+                subtitle="The baseline above applies all day. Add a window to vary by time.")
+            placeholder.set_sensitive(False)
+            self.g_sched.add(placeholder)
+            self.window_rows.append({"row": placeholder, "placeholder": True})
+
+    def add_window_row(self, win):
+        for entry in list(self.window_rows):
+            if entry.get("placeholder"):
+                self.g_sched.remove(entry["row"])
+                self.window_rows.remove(entry)
+
+        expander = Adw.ExpanderRow()
+        r_from = Adw.EntryRow(title="From (HH:MM)")
+        r_to = Adw.EntryRow(title="To (HH:MM)")
+        r_label = Adw.EntryRow(title="Label")
+        r_from.set_text(str(win.get("from", "")))
+        r_to.set_text(str(win.get("to", "")))
+        r_label.set_text(str(win.get("label", "")))
+
+        allow = win.get("allowFrom") or []
+        switches = {}
+        for other in self.cfg.get("spaces", []):
+            sid = str(other.get("id"))
+            sw = Adw.SwitchRow(title="Show " + (other.get("name") or sid), subtitle=sid)
+            sw.set_active(sid in allow)
+            switches[sid] = sw
+
+        r_unassigned = Adw.SwitchRow(title="Show apps in no space")
+        r_unassigned.set_active(win.get("allowUnassigned") is not False)
+
+        remove = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
+        remove.add_css_class("flat")
+        expander.add_suffix(remove)
+
+        for r in (r_from, r_to, r_label, *switches.values(), r_unassigned):
+            expander.add_row(r)
+
+        entry = {"row": expander, "from": r_from, "to": r_to, "label": r_label,
+                 "switches": switches, "unassigned": r_unassigned}
+
+        def retitle(*_):
+            allowed = [s for s, sw in switches.items() if sw.get_active()]
+            summary = ", ".join(allowed) if allowed else "nothing"
+            expander.set_title("%s to %s" % (r_from.get_text() or "??:??",
+                                             r_to.get_text() or "??:??"))
+            expander.set_subtitle((r_label.get_text() + "  ") if r_label.get_text() else "")
+            expander.set_subtitle((expander.get_subtitle() or "") + "shows " + summary)
+            self.on_field_changed()
+
+        for r in (r_from, r_to, r_label):
+            r.connect("changed", retitle)
+        for sw in (*switches.values(), r_unassigned):
+            sw.connect("notify::active", retitle)
+
+        def do_remove(_b):
+            self.g_sched.remove(expander)
+            self.window_rows.remove(entry)
+            self.on_field_changed()
+            if not self.window_rows:
+                self.rebuild_windows([])
+
+        remove.connect("clicked", do_remove)
+
+        self.g_sched.add(expander)
+        self.window_rows.append(entry)
+        retitle()
+
+    # --- collecting ---------------------------------------------------------
+
+    def collect(self):
+        space = self.current_space()
+        if space is None:
+            return
+        space["id"] = self.r_id.get_text().strip() or space.get("id")
+        space["name"] = self.r_name.get_text().strip()
+        space["icon"] = self.r_icon.get_text().strip()
+        space["color"] = self.r_color.get_text().strip()
+
+        cmd = self.r_bcmd.get_text().strip()
+        if cmd:
+            browser = space.get("browser") or {}
+            browser["command"] = cmd
+            profile = self.r_bprofile.get_text().strip()
+            if profile:
+                browser["profile"] = profile
+            else:
+                browser.pop("profile", None)
+            space["browser"] = browser
+        else:
+            space.pop("browser", None)
+
+        space["email"] = self.r_email.get_text().strip()
+        assistants = {}
+        if self.r_claude.get_text().strip():
+            assistants["claude"] = self.r_claude.get_text().strip()
+        if self.r_codex.get_text().strip():
+            assistants["codex"] = self.r_codex.get_text().strip()
+        if assistants:
+            space["assistants"] = assistants
+        else:
+            space.pop("assistants", None)
+
+        apps = [a.strip() for a in self.r_apps.get_text().split(",")]
+        space["apps"] = [a for a in apps if a]
+
+        ws = space.get("workspaces") or {}
+        ws["count"] = int(self.r_ws_count.get_value())
+        offset_text = self.r_ws_offset.get_text().strip()
+        if offset_text.isdigit():
+            ws["offset"] = int(offset_text)
+        else:
+            ws.pop("offset", None)
+        space["workspaces"] = ws
+
+        look = {}
+        if self.r_theme.get_text().strip():
+            look["theme"] = self.r_theme.get_text().strip()
+        if self.r_font.get_text().strip():
+            look["font"] = self.r_font.get_text().strip()
+        if self.r_bg.get_text().strip():
+            look["background"] = self.r_bg.get_text().strip()
+        if look:
+            space["appearance"] = look
+        else:
+            space.pop("appearance", None)
+
+        notif = space.get("notifications") or {}
+        notif["allowFrom"] = [s for s, sw in self.allow_switches.items() if sw.get_active()]
+        notif["allowUnassigned"] = self.r_unassigned.get_active()
+
+        windows = []
+        for entry in self.window_rows:
+            if entry.get("placeholder"):
+                continue
+            win = {
+                "from": entry["from"].get_text().strip(),
+                "to": entry["to"].get_text().strip(),
+                "allowFrom": [s for s, sw in entry["switches"].items() if sw.get_active()],
+                "allowUnassigned": entry["unassigned"].get_active(),
+            }
+            if entry["label"].get_text().strip():
+                win["label"] = entry["label"].get_text().strip()
+            windows.append(win)
+        if windows:
+            notif["schedule"] = windows
+        else:
+            notif.pop("schedule", None)
+        space["notifications"] = notif
+
+    # --- events -------------------------------------------------------------
+
+    def on_field_changed(self, *_a):
+        if self.loading:
+            return
+        self.dirty = True
+
+    def on_space_selected(self, _list, row):
+        if row is None or self.loading:
+            return
+        idx = row.get_index()
+        if idx == self.selected:
+            return
+        self.collect()
+        self.selected = idx
+        self.load_selected()
+
+    def on_add_space(self, _b):
+        self.collect()
+        sid = unique_id(self.cfg)
+        color = PALETTE[len(self.cfg["spaces"]) % len(PALETTE)]
+        self.cfg.setdefault("spaces", []).append({
+            "id": sid, "name": "New space", "icon": "●", "color": color,
+            "apps": [], "notifications": {"allowFrom": [sid], "allowUnassigned": True},
+        })
+        self.selected = len(self.cfg["spaces"]) - 1
+        self.refresh_sidebar()
+        self.load_selected()
+        self.dirty = True
+
+    def on_remove_space(self, _b):
+        space = self.current_space()
+        if space is None:
+            return
+        if len(self.cfg.get("spaces", [])) <= 1:
+            self.notify("Keep at least one space")
+            return
+        dialog = Adw.MessageDialog(
+            transient_for=self, heading="Remove this space?",
+            body="%s will be deleted. Other spaces referencing it in allowFrom will be "
+                 "cleaned up too." % (space.get("name") or space.get("id")))
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("remove", "Remove")
+        dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
+
+        def answered(_d, response):
+            if response != "remove":
+                return
+            sid = str(space.get("id"))
+            self.cfg["spaces"].remove(space)
+            for other in self.cfg["spaces"]:
+                notif = other.get("notifications") or {}
+                if sid in (notif.get("allowFrom") or []):
+                    notif["allowFrom"] = [x for x in notif["allowFrom"] if x != sid]
+                for win in notif.get("schedule") or []:
+                    if sid in (win.get("allowFrom") or []):
+                        win["allowFrom"] = [x for x in win["allowFrom"] if x != sid]
+            self.selected = max(0, self.selected - 1)
+            self.refresh_sidebar()
+            self.load_selected()
+            self.dirty = True
+
+        dialog.connect("response", answered)
+        dialog.present()
+
+    def on_add_window(self, _b):
+        self.add_window_row({"from": "09:00", "to": "17:00", "allowFrom": [], "label": ""})
+        self.dirty = True
+
+    def on_save(self, _b):
+        self.collect()
+        save_config(self.cfg)
+        self.dirty = False
+        code, out = run_cli("validate")
+        run_cli("install-menu")
+        self.refresh_sidebar()
+        if code == 0:
+            self.notify("Saved. " + out)
+        else:
+            self.notify("Saved with warnings, see Validate")
+
+    def on_capture_look(self, _b):
+        """Save whatever the desktop looks like right now into this space.
+
+        Only meaningful for the space that is currently active, since the theme
+        on screen belongs to it.
+        """
+        code, active = run_cli("current")
+        space = self.current_space()
+        if space is None:
+            return
+        if code == 0 and active.strip() != str(space.get("id")):
+            self.notify("Switch to this space first, the look on screen belongs to "
+                        + active.strip())
+            return
+        self.collect()
+        save_config(self.cfg)
+        rc, out = run_cli("appearance", "capture")
+        self.cfg = load_config()
+        self.load_selected()
+        self.notify("Captured the current theme, font, and background" if rc == 0 else out)
+
+    def on_validate(self, _b):
+        self.collect()
+        save_config(self.cfg)
+        self.dirty = False
+        code, out = run_cli("validate")
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading="Config is valid" if code == 0 else "Warnings",
+            body=out or "No output")
+        dialog.add_response("ok", "Close")
+        dialog.present()
+
+    def notify(self, text):
+        self.toast.add_toast(Adw.Toast(title=text, timeout=3))
+
+
+class App(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="org.omarchy.Spaces",
+                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_activate(self):
+        win = self.props.active_window or Window(self)
+        win.present()
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

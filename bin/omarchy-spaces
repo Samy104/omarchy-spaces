@@ -268,7 +268,12 @@ def cmd_switch(cfg, args):
     if space is None:
         die("no such space: %s (have: %s)" % (target, ", ".join(space_ids(cfg))))
     previous = read_active(cfg)
+    if isolation_on(cfg):
+        remember_current_slot(cfg, previous)
     write_active(target)
+    if isolation_on(cfg):
+        focus_space_workspace(cfg, target)
+    apply_appearance(cfg, space)
     run_hooks(cfg, target, previous)
     notify(cfg, space)
     print(target)
@@ -397,13 +402,418 @@ def cmd_validate(cfg, args):
                 problems.append("%s: %d minutes match more than one window, the first wins "
                                 "(first at %02d:%02d)" % (sid, len(overlaps),
                                                           overlaps[0] // 60, overlaps[0] % 60))
+    # Overlapping workspace ranges would put two spaces' windows in the same
+    # place, which defeats the isolation entirely.
+    if isolation_on(cfg):
+        seen = {}
+        for sid in ids:
+            off = ws_offset(cfg, sid)
+            for slot in range(1, ws_count(cfg, sid) + 1):
+                real = off + slot
+                if real in seen:
+                    problems.append("%s and %s both claim real workspace %d"
+                                    % (seen[real], sid, real))
+                    break
+                seen[real] = sid
+            if off < 0:
+                problems.append("%s has a negative workspace offset" % sid)
+
     if problems:
         for p in problems:
             print("warn: " + p)
         return 1
     print("config is valid, %d spaces" % len(ids))
+    if isolation_on(cfg):
+        for sid in ids:
+            off = ws_offset(cfg, sid)
+            print("  %-12s real workspaces %d-%d" % (sid, off + 1, off + ws_count(cfg, sid)))
     return 0
 
+
+
+
+# --- hyprland workspace isolation -------------------------------------------
+#
+# Each space owns a contiguous range of real Hyprland workspaces. Personal gets
+# 1 to 10, work gets 11 to 20, and so on. Windows are never moved on a switch,
+# which is what makes switching instant and free of races. "Workspace 1" simply
+# means a different real workspace depending on which space is active.
+#
+# Only the Lua dispatcher form works on Omarchy 4. The classic string form
+# ("hyprctl dispatch workspace 3") is a syntax error there.
+
+DEFAULT_WS_COUNT = 10
+
+
+def hypr(expr):
+    try:
+        p = subprocess.run(["hyprctl", "dispatch", expr],
+                           capture_output=True, text=True, timeout=5)
+        out = (p.stdout or "").strip()
+        if out and out != "ok":
+            return False, out
+        return p.returncode == 0, out
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, str(e)
+
+
+def hypr_json(what):
+    try:
+        p = subprocess.run(["hyprctl", "-j", what], capture_output=True, text=True, timeout=5)
+        return json.loads(p.stdout)
+    except Exception:
+        return None
+
+
+def isolation_on(cfg):
+    return cfg.get("workspaceIsolation") is not False
+
+
+def ws_count(cfg, space_id):
+    space = find_space(cfg, space_id) or {}
+    return int((space.get("workspaces") or {}).get("count", DEFAULT_WS_COUNT))
+
+
+def ws_offset(cfg, space_id):
+    """First real workspace belonging to a space.
+
+    An explicit offset in the config wins. Otherwise it is derived from the
+    space's position in the list, so isolation works with no extra config.
+    """
+    space = find_space(cfg, space_id)
+    if space is None:
+        return 0
+    ws = space.get("workspaces") or {}
+    if "offset" in ws:
+        return int(ws["offset"])
+    idx = space_ids(cfg).index(str(space_id))
+    return idx * ws_count(cfg, space_id)
+
+
+def ws_slot_path(space_id):
+    return os.path.join(STATE_DIR, "ws-" + str(space_id))
+
+
+def read_slot(space_id, default=1):
+    try:
+        with open(ws_slot_path(space_id)) as fh:
+            n = int(fh.read().strip())
+        return n if n >= 1 else default
+    except (OSError, ValueError):
+        return default
+
+
+def write_slot(space_id, n):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = ws_slot_path(space_id) + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(str(int(n)) + "\n")
+    os.replace(tmp, ws_slot_path(space_id))
+
+
+def current_real_ws():
+    d = hypr_json("activeworkspace")
+    try:
+        return int(d["id"])
+    except Exception:
+        return None
+
+
+def remember_current_slot(cfg, space_id):
+    """Store which slot of its own range the space was last on."""
+    real = current_real_ws()
+    if real is None:
+        return
+    off = ws_offset(cfg, space_id)
+    slot = real - off
+    if 1 <= slot <= ws_count(cfg, space_id):
+        write_slot(space_id, slot)
+
+
+def focus_space_workspace(cfg, space_id):
+    off = ws_offset(cfg, space_id)
+    slot = read_slot(space_id)
+    ok, err = hypr('hl.dsp.focus({ workspace = "%d" })' % (off + slot))
+    if not ok:
+        print("omarchy-spaces: could not switch workspace: %s" % err, file=sys.stderr)
+
+
+
+
+# --- appearance --------------------------------------------------------------
+#
+# Each space can pin a theme, a monospace font, and a background. Applying them
+# on switch makes the current context obvious at a glance, which is the whole
+# point of having spaces in the first place.
+#
+# These shell out to the stock omarchy commands rather than writing theme files
+# directly, so anything Omarchy supports keeps working.
+
+
+def omarchy(*args, timeout=25):
+    try:
+        p = subprocess.run(["omarchy", *args], capture_output=True, text=True, timeout=timeout)
+        return p.returncode == 0, (p.stdout + p.stderr).strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, str(e)
+
+
+def current_appearance():
+    out = {}
+    ok, v = omarchy("theme", "current", timeout=10)
+    if ok and v:
+        out["theme"] = v.splitlines()[0].strip()
+    ok, v = omarchy("font", "current", timeout=10)
+    if ok and v:
+        out["font"] = v.splitlines()[0].strip()
+    # `omarchy theme bg current` prints a prettified display name, not a path,
+    # and `bg set` needs a path. The state symlink is the real answer.
+    #
+    # Backgrounds live in ~/.local/state/omarchy/current/theme/backgrounds/,
+    # whose contents are replaced when the theme changes. Storing that absolute
+    # path would silently point at the next theme's image, so a background that
+    # belongs to a theme is stored as a bare filename and resolved after the
+    # theme is applied. Anything outside that directory is stored as a path.
+    link = os.path.join(STATE_HOME, "omarchy", "current", "background")
+    try:
+        real = os.path.realpath(link)
+    except OSError:
+        return out
+    if not real or not os.path.exists(real):
+        return out
+    theme_bgs = os.path.join(STATE_HOME, "omarchy", "current", "theme", "backgrounds")
+    out["background"] = (os.path.basename(real)
+                         if os.path.dirname(real) == theme_bgs else real)
+    return out
+
+
+def resolve_background(value):
+    """Turn a stored background into a path that exists, or None."""
+    if not value:
+        return None
+    if os.path.isabs(value):
+        return value if os.path.exists(value) else None
+    candidate = os.path.join(STATE_HOME, "omarchy", "current", "theme", "backgrounds", value)
+    return candidate if os.path.exists(candidate) else None
+
+
+def apply_appearance(cfg, space):
+    """Apply a space's pinned look.
+
+    Theme first, because setting a theme also resets the background, so a
+    pinned background has to be applied after it to survive.
+    """
+    if cfg.get("applyAppearance") is False:
+        return
+    ap = (space or {}).get("appearance") or {}
+    if not ap:
+        return
+    if ap.get("theme"):
+        omarchy("theme", "set", str(ap["theme"]))
+    if ap.get("font"):
+        omarchy("font", "set", str(ap["font"]))
+    if ap.get("background"):
+        path = resolve_background(os.path.expanduser(str(ap["background"])))
+        if path:
+            omarchy("theme", "bg", "set", path)
+
+
+def cmd_appearance(cfg, args):
+    sub = args[0] if args else "show"
+    active = read_active(cfg)
+    space = find_space(cfg, active)
+
+    if sub == "show":
+        ap = (space or {}).get("appearance") or {}
+        cur = current_appearance()
+        print("space   %s" % active)
+        for key in ("theme", "font", "background"):
+            pinned = ap.get(key) or "(not pinned)"
+            print("  %-11s pinned=%-28s now=%s" % (key, pinned, cur.get(key, "?")))
+        return 0
+
+    if sub == "capture":
+        cur = current_appearance()
+        if not cur:
+            die("could not read the current theme, font, or background")
+        space["appearance"] = cur
+        save_config_file(cfg)
+        print("saved to %s:" % active)
+        for k, v in cur.items():
+            print("  %-11s %s" % (k, v))
+        return 0
+
+    if sub == "clear":
+        if space and "appearance" in space:
+            del space["appearance"]
+            save_config_file(cfg)
+        print("cleared the pinned look for %s" % active)
+        return 0
+
+    if sub == "apply":
+        apply_appearance(cfg, space)
+        print("applied %s" % active)
+        return 0
+
+    die("usage: omarchy-spaces appearance [show|capture|apply|clear]")
+
+
+def save_config_file(cfg):
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, CONFIG_PATH)
+
+
+def move_expr(real_ws, follow=True, address=None):
+    """Build the Lua dispatcher call for moving a window to a workspace.
+
+    Without an address this acts on whatever Hyprland considers active, which
+    is what a hotkey wants. With one it is deterministic, which is what a
+    script or the config app wants.
+    """
+    parts = ['workspace = "%d"' % real_ws]
+    if address:
+        parts.append('window = "address:%s"' % address)
+    if not follow:
+        parts.append("follow = false")
+    return "hl.dsp.window.move({ %s })" % ", ".join(parts)
+
+
+def arg_value(args, flag):
+    """Read `--flag value` out of an arg list."""
+    if flag in args:
+        i = args.index(flag)
+        if i + 1 < len(args):
+            return args[i + 1]
+    for a in args:
+        if a.startswith(flag + "="):
+            return a.split("=", 1)[1]
+    return None
+
+
+def cmd_workspace(cfg, args):
+    """Go to slot N of the active space's range."""
+    if not args:
+        die("usage: omarchy-spaces workspace <n>")
+    try:
+        n = int(args[0])
+    except ValueError:
+        die("workspace takes a number")
+    active = read_active(cfg)
+    count = ws_count(cfg, active)
+    if not (1 <= n <= count):
+        die("space '%s' has slots 1 to %d" % (active, count))
+    write_slot(active, n)
+    target = ws_offset(cfg, active) + n
+    ok, err = hypr('hl.dsp.focus({ workspace = "%d" })' % target)
+    if not ok:
+        die("hyprctl failed: %s" % err)
+    return 0
+
+
+def cmd_move_to_workspace(cfg, args):
+    """Move the focused window to slot N of the active space, and follow it."""
+    if not args:
+        die("usage: omarchy-spaces move-to-workspace <n>")
+    try:
+        n = int(args[0])
+    except ValueError:
+        die("move-to-workspace takes a number")
+    active = read_active(cfg)
+    count = ws_count(cfg, active)
+    if not (1 <= n <= count):
+        die("space '%s' has slots 1 to %d" % (active, count))
+    follow = "--stay" not in args
+    target = ws_offset(cfg, active) + n
+    ok, err = hypr(move_expr(target, follow, arg_value(args, "--address")))
+    if not ok:
+        die("hyprctl failed: %s" % err)
+    if follow:
+        write_slot(active, n)
+    return 0
+
+
+def cmd_move_to_space(cfg, args):
+    """Send the focused window to another space.
+
+    This is the escape hatch for a window opened in the wrong context. The
+    window leaves silently, so you stay where you are.
+    """
+    if not args:
+        die("usage: omarchy-spaces move-to-space <space-id> [slot] [--follow]")
+    target_space = args[0]
+    if find_space(cfg, target_space) is None:
+        die("no such space: %s (have: %s)" % (target_space, ", ".join(space_ids(cfg))))
+    follow = "--follow" in args
+    addr = arg_value(args, "--address")
+    rest = [a for a in args[1:] if not a.startswith("--") and a != addr]
+
+    active = read_active(cfg)
+    if rest:
+        try:
+            slot = int(rest[0])
+        except ValueError:
+            die("slot must be a number")
+    else:
+        real = current_real_ws()
+        slot = (real - ws_offset(cfg, active)) if real is not None else 1
+        if not (1 <= slot <= ws_count(cfg, target_space)):
+            slot = read_slot(target_space)
+
+    count = ws_count(cfg, target_space)
+    if not (1 <= slot <= count):
+        die("space '%s' has slots 1 to %d" % (target_space, count))
+
+    target = ws_offset(cfg, target_space) + slot
+    ok, err = hypr(move_expr(target, follow=False, address=arg_value(args, "--address")))
+    if not ok:
+        die("hyprctl failed: %s" % err)
+    print("moved to %s slot %d (real workspace %d)" % (target_space, slot, target))
+    if follow:
+        return cmd_switch(cfg, [target_space])
+    return 0
+
+
+def cmd_windows(cfg, args):
+    """Show open windows grouped by the space that owns their workspace."""
+    clients = hypr_json("clients")
+    if clients is None:
+        die("could not reach hyprctl")
+    active = read_active(cfg)
+    buckets = {sid: [] for sid in space_ids(cfg)}
+    orphans = []
+    for c in clients:
+        try:
+            real = int(c["workspace"]["id"])
+        except Exception:
+            continue
+        placed = False
+        for sid in space_ids(cfg):
+            off = ws_offset(cfg, sid)
+            if off < real <= off + ws_count(cfg, sid):
+                buckets[sid].append((real - off, c))
+                placed = True
+                break
+        if not placed:
+            orphans.append((real, c))
+
+    for sid in space_ids(cfg):
+        space = find_space(cfg, sid)
+        mark = "*" if sid == active else " "
+        off = ws_offset(cfg, sid)
+        print("%s %s (%s)  real workspaces %d-%d"
+              % (mark, space.get("name") or sid, sid, off + 1, off + ws_count(cfg, sid)))
+        if not buckets[sid]:
+            print("      (no windows)")
+        for slot, c in sorted(buckets[sid], key=lambda x: x[0]):
+            print("      slot %-2d %-28s %s" % (slot, c.get("class", "?"), (c.get("title") or "")[:44]))
+    if orphans:
+        print("  outside every space range")
+        for real, c in sorted(orphans):
+            print("      ws %-3d %-28s %s" % (real, c.get("class", "?"), (c.get("title") or "")[:44]))
+    return 0
 
 
 MENU_BEGIN = "  // >>> omarchy-spaces managed block, do not edit by hand"
@@ -513,6 +923,19 @@ USAGE = """omarchy-spaces, context spaces for Omarchy
   install-menu            add the space rows to the Omarchy menu
   remove-menu             take them back out
   menu                    print the menu rows without writing anything
+
+Windows
+  workspace <n>           go to slot n of the active space
+  move-to-workspace <n>   move the focused window to slot n [--stay]
+  move-to-space <id> [n]  send the focused window to another space [--follow]
+                          [--address 0x..] targets one window instead of the focused one
+  windows                 list open windows grouped by space
+
+Appearance
+  appearance show         the pinned look for the active space, and the live one
+  appearance capture      save the current theme, font, and background to it
+  appearance apply        re-apply the pinned look
+  appearance clear        stop pinning a look for this space
 """
 
 
@@ -521,6 +944,9 @@ COMMANDS = {
     "status": cmd_status, "open": cmd_open, "which": cmd_which,
     "get": cmd_get, "validate": cmd_validate, "menu": cmd_menu,
     "install-menu": cmd_install_menu, "remove-menu": cmd_remove_menu,
+    "workspace": cmd_workspace, "move-to-workspace": cmd_move_to_workspace,
+    "move-to-space": cmd_move_to_space, "windows": cmd_windows,
+    "appearance": cmd_appearance,
 }
 
 

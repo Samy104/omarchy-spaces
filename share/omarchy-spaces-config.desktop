@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Name=Omarchy Spaces
+Comment=Configure spaces, notification routing, workspaces, and appearance
+Exec=omarchy-spaces-config
+Icon=preferences-desktop
+Type=Application
+Terminal=false
+Categories=Settings;DesktopSettings;
+StartupNotify=true
+StartupWMClass=org.omarchy.Spaces

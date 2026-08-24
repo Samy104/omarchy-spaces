@@ -1,0 +1,398 @@
+#!/usr/bin/env python3
+"""Omarchy Spaces command line interface.
+
+Switching, status, and URL routing. The shell plugin reads the same config and
+state files, so the bar widget and this CLI never disagree about which space is
+active.
+
+Written in python3 rather than node because Hyprland keybindings and .desktop
+handlers run with a minimal PATH, and python3 is always present on Omarchy
+while a mise managed node is not.
+
+The policy rules here mirror SpacesLogic.js. test/parity.test.js checks both
+implementations against each other over every minute of the day, so a change to
+one without the other fails the suite.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime
+
+CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+STATE_HOME = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+CONFIG_PATH = os.path.join(CONFIG_HOME, "omarchy-spaces", "spaces.json")
+STATE_DIR = os.path.join(STATE_HOME, "omarchy-spaces")
+ACTIVE_PATH = os.path.join(STATE_DIR, "active")
+
+TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def die(msg, code=1):
+    print("omarchy-spaces: " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        die("no config at %s\nRun: omarchy-spaces init" % CONFIG_PATH, 2)
+    try:
+        with open(CONFIG_PATH) as fh:
+            cfg = json.load(fh)
+    except json.JSONDecodeError as e:
+        die("config is not valid JSON: %s" % e, 2)
+    if not isinstance(cfg.get("spaces"), list) or not cfg["spaces"]:
+        die("config has no spaces", 2)
+    return cfg
+
+
+def parse_time(value):
+    if not isinstance(value, str):
+        return None
+    m = TIME_RE.match(value.strip())
+    if not m:
+        return None
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
+def window_contains(win, now):
+    frm = parse_time((win or {}).get("from"))
+    to = parse_time((win or {}).get("to"))
+    if frm is None or to is None:
+        return False
+    if frm == to:
+        return True
+    if frm < to:
+        return frm <= now < to
+    return now >= frm or now < to
+
+
+def normalize_list(value):
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        s = str(item or "").strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def space_ids(cfg):
+    return [str(s["id"]) for s in cfg.get("spaces", []) if s.get("id")]
+
+
+def find_space(cfg, space_id):
+    for s in cfg.get("spaces", []):
+        if str(s.get("id")) == str(space_id):
+            return s
+    return None
+
+
+def normalize_app_key(name):
+    s = str(name or "").strip().lower()
+    if s.endswith(".desktop"):
+        s = s[:-8]
+    return s
+
+
+def space_for_app(cfg, app):
+    key = normalize_app_key(app)
+    if not key:
+        return None
+    for s in cfg.get("spaces", []):
+        for a in normalize_list(s.get("apps")):
+            if normalize_app_key(a) == key:
+                return str(s["id"])
+    return None
+
+
+def resolve_policy(cfg, space_id, now):
+    space = find_space(cfg, space_id)
+    if space is None:
+        return {"allowFrom": space_ids(cfg), "source": "no-space",
+                "window": None, "allowUnassigned": True}
+    notif = space.get("notifications") or {}
+    baseline = normalize_list(notif.get("allowFrom"))
+    allow_unassigned = notif.get("allowUnassigned") is not False
+    for win in (notif.get("schedule") or []):
+        if window_contains(win, now):
+            wu = win.get("allowUnassigned")
+            return {
+                "allowFrom": normalize_list(win.get("allowFrom")),
+                "source": "schedule",
+                "window": {"from": win.get("from"), "to": win.get("to"),
+                           "label": win.get("label", "")},
+                "allowUnassigned": (wu is not False) if wu is not None else allow_unassigned,
+            }
+    return {"allowFrom": baseline, "source": "baseline",
+            "window": None, "allowUnassigned": allow_unassigned}
+
+
+def minutes_now():
+    n = datetime.now()
+    return n.hour * 60 + n.minute
+
+
+def read_active(cfg):
+    if os.path.exists(ACTIVE_PATH):
+        try:
+            with open(ACTIVE_PATH) as fh:
+                val = fh.read().strip()
+            if find_space(cfg, val):
+                return val
+        except OSError:
+            pass
+    fallback = cfg.get("activeSpace")
+    if find_space(cfg, fallback):
+        return str(fallback)
+    return space_ids(cfg)[0]
+
+
+def write_active(space_id):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = ACTIVE_PATH + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(str(space_id) + "\n")
+    os.replace(tmp, ACTIVE_PATH)
+
+
+def notify(cfg, space):
+    if cfg.get("switchNotification") is False:
+        return
+    icon = space.get("icon") or ""
+    name = space.get("name") or space.get("id")
+    for cmd in (["omarchy-notification-send", "-g", icon, "Space: %s" % name],
+                ["notify-send", "-a", "omarchy-spaces", "Space: %s" % name]):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=5)
+            return
+        except (OSError, subprocess.SubprocessError):
+            continue
+
+
+def run_hooks(cfg, space_id, previous):
+    hook_dir = os.path.join(CONFIG_HOME, "omarchy-spaces", "hooks")
+    if not os.path.isdir(hook_dir):
+        return
+    env = dict(os.environ)
+    env["OMARCHY_SPACE"] = str(space_id)
+    env["OMARCHY_SPACE_PREVIOUS"] = str(previous or "")
+    for name in sorted(os.listdir(hook_dir)):
+        path = os.path.join(hook_dir, name)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            try:
+                subprocess.run([path], env=env, timeout=15, capture_output=True)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+
+# --- commands ---------------------------------------------------------------
+
+def cmd_list(cfg, args):
+    active = read_active(cfg)
+    for s in cfg["spaces"]:
+        mark = "*" if str(s["id"]) == active else " "
+        print("%s %-12s %-16s %s" % (mark, s["id"], s.get("name", ""), s.get("email", "")))
+    return 0
+
+
+def cmd_current(cfg, args):
+    active = read_active(cfg)
+    if args and args[0] == "--json":
+        print(json.dumps(find_space(cfg, active)))
+    else:
+        print(active)
+    return 0
+
+
+def cmd_switch(cfg, args):
+    if not args:
+        die("usage: omarchy-spaces switch <space-id>")
+    target = args[0]
+    space = find_space(cfg, target)
+    if space is None:
+        die("no such space: %s (have: %s)" % (target, ", ".join(space_ids(cfg))))
+    previous = read_active(cfg)
+    write_active(target)
+    run_hooks(cfg, target, previous)
+    notify(cfg, space)
+    print(target)
+    return 0
+
+
+def cmd_cycle(cfg, args, step):
+    ids = space_ids(cfg)
+    active = read_active(cfg)
+    idx = ids.index(active) if active in ids else 0
+    return cmd_switch(cfg, [ids[(idx + step) % len(ids)]])
+
+
+def cmd_status(cfg, args):
+    active = read_active(cfg)
+    space = find_space(cfg, active)
+    now = minutes_now()
+    pol = resolve_policy(cfg, active, now)
+    if args and args[0] == "--json":
+        print(json.dumps({"active": active, "now": now, "policy": pol}, indent=2))
+        return 0
+    print("space      %s (%s)" % (space.get("name", active), active))
+    print("email      %s" % space.get("email", "(none)"))
+    br = space.get("browser") or {}
+    print("browser    %s profile=%s" % (br.get("command", "(none)"), br.get("profile", "(none)")))
+    print("time       %02d:%02d" % (now // 60, now % 60))
+    if pol["window"]:
+        print("window     %s to %s  %s" % (pol["window"]["from"], pol["window"]["to"],
+                                           pol["window"].get("label", "")))
+    else:
+        print("window     none, using baseline")
+    allowed = ", ".join(pol["allowFrom"]) if pol["allowFrom"] else "(nothing)"
+    print("allowing   %s" % allowed)
+    print("unassigned %s" % ("shown" if pol["allowUnassigned"] else "hidden"))
+    return 0
+
+
+def cmd_open(cfg, args):
+    if not args:
+        die("usage: omarchy-spaces open <url>")
+    url = args[0]
+    active = read_active(cfg)
+    space = find_space(cfg, active)
+    browser = (space or {}).get("browser") or {}
+    if not browser.get("command"):
+        os.execvp("xdg-open", ["xdg-open", url])
+    argv = [str(browser["command"])]
+    argv += normalize_list(browser.get("args"))
+    if browser.get("profile"):
+        argv.append("--profile-directory=" + str(browser["profile"]))
+    argv.append(url)
+    os.execvp(argv[0], argv)
+
+
+def cmd_which(cfg, args):
+    """Print the argv that `open` would exec, without running it."""
+    url = args[0] if args else "URL"
+    active = read_active(cfg)
+    space = find_space(cfg, active)
+    browser = (space or {}).get("browser") or {}
+    if not browser.get("command"):
+        print(json.dumps(["xdg-open", url]))
+        return 0
+    argv = [str(browser["command"])]
+    argv += normalize_list(browser.get("args"))
+    if browser.get("profile"):
+        argv.append("--profile-directory=" + str(browser["profile"]))
+    argv.append(url)
+    print(json.dumps(argv))
+    return 0
+
+
+def cmd_get(cfg, args):
+    """Read one field off the active space, for scripts and shell prompts."""
+    if not args:
+        die("usage: omarchy-spaces get <email|name|icon|color|id|assistant.<tool>>")
+    active = read_active(cfg)
+    space = find_space(cfg, active) or {}
+    key = args[0]
+    if key.startswith("assistant."):
+        val = (space.get("assistants") or {}).get(key.split(".", 1)[1], "")
+    else:
+        val = space.get(key, "")
+    print(val if val is not None else "")
+    return 0
+
+
+def cmd_init(cfg_unused, args):
+    target_dir = os.path.dirname(CONFIG_PATH)
+    os.makedirs(target_dir, exist_ok=True)
+    if os.path.exists(CONFIG_PATH) and "--force" not in args:
+        die("config already exists at %s (use --force to overwrite)" % CONFIG_PATH)
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    example = os.path.join(here, "config", "spaces.example.json")
+    with open(example) as src, open(CONFIG_PATH, "w") as dst:
+        dst.write(src.read())
+    print("wrote %s" % CONFIG_PATH)
+    return 0
+
+
+def cmd_validate(cfg, args):
+    problems = []
+    ids = space_ids(cfg)
+    if len(set(ids)) != len(ids):
+        problems.append("duplicate space ids")
+    for s in cfg["spaces"]:
+        sid = s.get("id", "(missing id)")
+        notif = s.get("notifications") or {}
+        for ref in normalize_list(notif.get("allowFrom")):
+            if ref not in ids:
+                problems.append("%s: allowFrom references unknown space '%s'" % (sid, ref))
+        wins = notif.get("schedule") or []
+        for w in wins:
+            if parse_time(w.get("from")) is None or parse_time(w.get("to")) is None:
+                problems.append("%s: bad window %s to %s" % (sid, w.get("from"), w.get("to")))
+            for ref in normalize_list(w.get("allowFrom")):
+                if ref not in ids:
+                    problems.append("%s: window allowFrom references unknown space '%s'" % (sid, ref))
+        if wins:
+            gaps = [m for m in range(1440)
+                    if sum(1 for w in wins if window_contains(w, m)) == 0]
+            overlaps = [m for m in range(1440)
+                        if sum(1 for w in wins if window_contains(w, m)) > 1]
+            if gaps:
+                problems.append("%s: %d minutes fall in no window, baseline applies there "
+                                "(first at %02d:%02d)" % (sid, len(gaps), gaps[0] // 60, gaps[0] % 60))
+            if overlaps:
+                problems.append("%s: %d minutes match more than one window, the first wins "
+                                "(first at %02d:%02d)" % (sid, len(overlaps),
+                                                          overlaps[0] // 60, overlaps[0] % 60))
+    if problems:
+        for p in problems:
+            print("warn: " + p)
+        return 1
+    print("config is valid, %d spaces" % len(ids))
+    return 0
+
+
+USAGE = """omarchy-spaces, context spaces for Omarchy
+
+  list                    show every space, the active one is marked
+  current [--json]        print the active space id
+  switch <id>             make a space active
+  next | prev             cycle through spaces
+  status [--json]         show the notification policy in effect right now
+  open <url>              open a url in the active space's browser profile
+  which [url]             print the argv `open` would run, without running it
+  get <field>             read a field off the active space
+  init [--force]          write a starter config
+  validate                check the config for gaps, overlaps, and bad refs
+"""
+
+
+COMMANDS = {
+    "list": cmd_list, "current": cmd_current, "switch": cmd_switch,
+    "status": cmd_status, "open": cmd_open, "which": cmd_which,
+    "get": cmd_get, "validate": cmd_validate,
+}
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(USAGE)
+        return 0
+    cmd, args = argv[0], argv[1:]
+    if cmd == "init":
+        return cmd_init(None, args)
+    if cmd == "next":
+        return cmd_cycle(load_config(), args, 1)
+    if cmd == "prev":
+        return cmd_cycle(load_config(), args, -1)
+    fn = COMMANDS.get(cmd)
+    if fn is None:
+        die("unknown command: %s\n\n%s" % (cmd, USAGE))
+    return fn(load_config(), args)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

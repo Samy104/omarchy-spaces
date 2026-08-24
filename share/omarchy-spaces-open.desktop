@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Name=Omarchy Spaces (route by space)
+Comment=Open links in the browser profile that belongs to the active space
+Exec=omarchy-spaces open %u
+Icon=applications-internet
+Type=Application
+Terminal=false
+NoDisplay=true
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;

@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "activeSpace": "personal",
+  "criticalBypass": true,
+  "spaces": [
+    {
+      "id": "personal",
+      "name": "Personal",
+      "icon": "󰃜",
+      "color": "#7aa2f7",
+      "browser": { "command": "brave", "profile": "Default" },
+      "email": "samy104@gmail.com",
+      "assistants": {
+        "claude": "personal",
+        "codex": "personal"
+      },
+      "apps": ["Signal", "Spotify", "Brave-browser", "org.gnome.Photos"],
+      "notifications": {
+        "allowFrom": ["personal", "work"],
+        "allowUnassigned": true,
+        "schedule": [
+          { "from": "08:00", "to": "17:00", "allowFrom": ["personal", "work"], "label": "Work hours, everything" },
+          { "from": "17:00", "to": "22:00", "allowFrom": ["personal"], "label": "Evening, personal only" },
+          { "from": "22:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Night, silent" }
+        ]
+      }
+    },
+    {
+      "id": "work",
+      "name": "HiScale",
+      "icon": "󰌛",
+      "color": "#9ece6a",
+      "browser": { "command": "brave", "profile": "Profile 1" },
+      "email": "samy@hiscalesolutions.com",
+      "assistants": {
+        "claude": "work",
+        "codex": "work"
+      },
+      "apps": ["Slack", "zoom", "google-chrome", "Thunderbird"],
+      "notifications": {
+        "allowFrom": ["work"],
+        "allowUnassigned": false,
+        "schedule": [
+          { "from": "08:00", "to": "18:00", "allowFrom": ["work"], "label": "Work hours" },
+          { "from": "18:00", "to": "08:00", "allowFrom": [], "allowUnassigned": false, "label": "Off hours, silent" }
+        ]
+      }
+    }
+  ]
+}

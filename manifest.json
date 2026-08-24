@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "spaces.omarchy-spaces",
+  "name": "Omarchy Spaces",
+  "version": "0.1.0",
+  "author": "Samy Lemcelli",
+  "description": "Context spaces for Omarchy. Each space owns its browser profile, email, assistant accounts, and notification policy.",
+  "kinds": ["service", "bar-widget", "panel"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Spaces",
+    "description": "Current space indicator with a switcher and policy settings",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showLabel": true,
+      "showPolicyDot": true
+    },
+    "schema": [
+      { "key": "showLabel", "type": "bool", "label": "Show space name next to the icon" },
+      { "key": "showPolicyDot", "type": "bool", "label": "Show a dot when notifications are being filtered" }
+    ]
+  }
+}

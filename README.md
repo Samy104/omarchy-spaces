@@ -113,8 +113,10 @@ under `$HOME` and needs no sudo.
 
 Nothing outside this plugin changes unless you ask. `--with-url-handler`
 reassigns your default browser so links follow the active space.
-`--replace-workspaces` swaps in the slot-numbered workspace widget and disables
-Omarchy's own. `--all` does both. `./install.sh --help` lists them.
+`--replace-workspaces` swaps in the slot-numbered workspace widget and
+**disables `omarchy.workspaces`**, which is documented in full under
+[Installation](docs/Installation.md) since it is the one step that turns off
+something of Omarchy's own. `--all` does both. `./install.sh --help` lists them.
 
 Add the space rows to the Omarchy menu:
 
@@ -213,7 +215,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 1.0.0, running on Omarchy 4.0.0 with no QML warnings.
+Version 1.0.1, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is

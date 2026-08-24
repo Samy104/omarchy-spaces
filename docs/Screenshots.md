@@ -56,6 +56,21 @@ overrides them.
 Click a binding and press the combination you want. Conflicts are checked
 against everything Hyprland already has bound before anything is written.
 
+## The workspace widget
+
+Three states, in the work space on real workspace 19. Omarchy's own widget,
+which stops at workspace 10 and so highlights nothing:
+
+![Stock](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-stock.png)
+
+Both enabled, which is what `--replace-workspaces` avoids:
+
+![Both](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-both.png)
+
+After the swap, numbered by slot:
+
+![Ours](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-ours.png)
+
 ## Regenerating them
 
 ```bash

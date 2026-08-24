@@ -8,18 +8,78 @@ cd omarchy-spaces
 ./install.sh
 ```
 
-`install.sh` does four things. It copies the shell plugin to
-`~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces/`, installs the CLI to
-`~/.local/bin/omarchy-spaces`, writes a starter config if you have none, and
-validates it.
+`install.sh` copies the shell plugin to
+`~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces/`, installs the CLI
+to `~/.local/bin/omarchy-spaces`, writes a starter config if you have none,
+enables the plugin, and validates the result.
 
 Everything lands under `$HOME`. No sudo, nothing system wide.
 
-`install.sh` also installs the GTK4 config app when python-gobject and
-libadwaita are present. It shows up in your launcher as "Omarchy Spaces", or run
+It also installs the GTK4 config app when python-gobject and libadwaita are
+present. It shows up in your launcher as "Omarchy Spaces", or run
 `omarchy-spaces-config`.
 
+## What a plain install does not touch
+
+Nothing of Omarchy's own changes unless you ask for it.
+
+| Option | What it also does |
+|---|---|
+| `--with-url-handler` | Links open in the active space's browser, which reassigns your default browser |
+| `--replace-workspaces` | Swaps in the slot-numbered workspace widget, which **disables `omarchy.workspaces`** |
+| `--all` | Both |
+
+`./install.sh --help` lists them.
+
+## The workspace widget, and what it replaces
+
+This is the one step that turns off something of Omarchy's own, so it waits to
+be asked, and it is worth understanding before you ask.
+
+**Why it exists.** Omarchy's own workspace widget only knows workspaces 1 to
+10. Its list is seeded with 1 to 5 and accepts ids `> 0 && <= 10`. A second
+space uses real workspaces 11 to 20, so the widget cannot show where you are.
+
+Stock widget, work space active, sitting on real workspace 19:
+
+![Omarchy's widget in a second space](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-stock.png)
+
+It draws 1 to 6, highlights nothing, and marks nothing occupied. The workspace
+you are on is not in its list.
+
+**If you enable ours without disabling theirs**, both draw:
+
+![Both widgets enabled](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-both.png)
+
+Two runs of numbers. The first is Omarchy's, dim and inert. The second is ours.
+That is why `--replace-workspaces` does both halves rather than only enabling.
+
+**After the swap:**
+
+![The slot-numbered widget](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-ours.png)
+
+Slots 1 to 5, plus any other slot holding a window, with the focused slot drawn
+as a dot rather than a number. That is how Omarchy's own widget marks focus, so
+it should look familiar.
+
+These are slots within the active space. The bar reads 1 to 10 in every space,
+while the real workspaces underneath are 1 to 10 in personal and 11 to 20 in
+work.
+
+**To undo it:**
+
+```bash
+omarchy plugin enable omarchy.workspaces --section left
+omarchy plugin disable io.github.samy104.omarchy-spaces-workspaces
+```
+
+Your spaces are unaffected either way. This widget only draws numbers; the
+isolation itself does not depend on it.
+
 ## Enable the bar widget
+
+`install.sh` enables it already. If you skipped that with
+`OMARCHY_SPACES_NO_ENABLE=1`:
 
 ```bash
 omarchy plugin enable io.github.samy104.omarchy-spaces

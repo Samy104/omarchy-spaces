@@ -118,6 +118,16 @@ only changes notifications, browser, and appearance.
 
 ## What the bar shows
 
-Omarchy's workspace widget shows real workspace ids, so in the work space you
-see 11 to 20 rather than 1 to 10. The numbers you press and the numbers on the
-bar differ. This is cosmetic and on the list to improve.
+The bundled workspace widget numbers by slot, so the bar reads 1 to 10 in every
+space and matches the numbers you press.
+
+![The slot-numbered widget](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-ours.png)
+
+It is not enabled by default, because switching it on means switching off
+Omarchy's own. Run `./install.sh --replace-workspaces`, and see
+[Installation](Installation) for what changes.
+
+Omarchy's own widget only accepts workspace ids 1 to 10, so in a second space
+it cannot show where you are at all:
+
+![Omarchy's widget in a second space](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-stock.png)

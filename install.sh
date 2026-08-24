@@ -113,12 +113,29 @@ else
   # while theirs is still on would show two rows of numbers, so it waits to
   # be asked.
   if [ "$REPLACE_WORKSPACES" = "1" ]; then
-    omarchy plugin enable "$WS_ID" >/dev/null 2>&1 || say "  enable $WS_ID failed, run it by hand"
+    omarchy plugin enable "$WS_ID" --section left >/dev/null 2>&1 \
+      || say "  enable $WS_ID failed, run it by hand"
     omarchy plugin disable omarchy.workspaces >/dev/null 2>&1 || true
-    say "  workspace widget swapped in, Omarchy's own is now disabled"
+    say ""
+    say "  Workspace widget swapped:"
+    say "    enabled   $WS_ID"
+    say "    DISABLED  omarchy.workspaces   (Omarchy's own, re-enable any time)"
+    say ""
+    say "  Expect the bar to show 1 to 10 in every space, with the focused"
+    say "  slot as a dot. Before, a second space showed workspaces it could"
+    say "  not represent: Omarchy's widget stops at 10, so on real workspace"
+    say "  19 it drew 1 to 6 with nothing highlighted."
+    say ""
+    say "  To undo:  omarchy plugin enable omarchy.workspaces --section left"
+    say "            omarchy plugin disable $WS_ID"
   else
-    say "  left Omarchy's workspace widget alone"
-    say "  to show slot numbers instead of real workspace ids, re-run with"
+    say ""
+    say "  Left Omarchy's workspace widget (omarchy.workspaces) enabled and"
+    say "  untouched. Nothing of Omarchy's own has been changed."
+    say ""
+    say "  Note: Omarchy's widget only knows workspaces 1 to 10, so in a second"
+    say "  space, which uses 11 to 20, it shows numbers you are not on and"
+    say "  highlights nothing. To swap in the widget that numbers by slot:"
     say "    ./install.sh --replace-workspaces"
   fi
 fi

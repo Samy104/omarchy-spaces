@@ -36,8 +36,9 @@ omarchy-spaces install-menu
 ```
 
 This splices a delimited block into
-`~/.config/omarchy/extensions/omarchy-menu.jsonc`, one row per space, with a
-check mark on the active one. Your own entries and comments are left alone.
+`~/.config/omarchy/extensions/omarchy-menu.jsonc`, one row per space with a
+check mark on the active one, plus a "Space settings" row that opens the
+configuration app. Your own entries and comments are left alone.
 Re-run it whenever you add or rename a space. `omarchy-spaces remove-menu`
 takes the block back out.
 

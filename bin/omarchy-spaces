@@ -1676,6 +1676,14 @@ def menu_block(cfg):
             '"checked":"[ \\"$(omarchy-spaces current)\\" = %s ]"},'
             % (sid, icon, name, desc, sid, sid)
         )
+    # The bar widget opens this menu, so the way into the settings app belongs
+    # here rather than behind a third mouse button nobody would guess.
+    # `when` hides the row on a machine where the GTK app was not installed,
+    # which install.sh skips when python-gobject or libadwaita are missing.
+    lines.append('  "spaces.settings": {"icon":"\uf013","label":"Space settings",'
+                 '"description":"Spaces, notification rules, keybinds",'
+                 '"action":"uwsm-app -- omarchy-spaces-config",'
+                 '"when":"command -v omarchy-spaces-config"},')
     lines.append(MENU_END)
     return "\n".join(lines)
 

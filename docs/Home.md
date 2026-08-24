@@ -50,9 +50,10 @@ the active context is obvious. See [Appearance](Appearance).
 
 ## Configuration app
 
-`omarchy-spaces-config` is a GTK4 editor for everything below. It appears in
-your launcher as "Omarchy Spaces". Editing `spaces.json` by hand works equally
-well.
+`omarchy-spaces-config` is a GTK4 editor for everything below. Reach it by
+clicking the Spaces indicator in the bar and picking "Space settings", from
+your launcher as "Omarchy Spaces", or by running the command. Editing
+`spaces.json` by hand works equally well.
 
 ## Two files
 

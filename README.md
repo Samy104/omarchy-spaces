@@ -192,7 +192,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.7.0, running on Omarchy 4.0.0 with no QML warnings.
+Version 0.7.1, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -204,7 +204,8 @@ Also verified live: switching jumps to the space's workspace range, a window
 moved with `move-to-space` lands in the target range while the rest stay put,
 and a pinned theme is applied on switch.
 
-`omarchy-spaces-config` is a GTK4 and libadwaita editor for all of it, with
+`omarchy-spaces-config` is a GTK4 and libadwaita editor for all of it. Click
+the Spaces indicator in the bar and pick "Space settings" to open it. It has
 General, Defaults, and Keybinds pages beside the per-space ones. Keybinds are
 recorded by pressing the combination, checked for conflicts, and written to a
 delimited block in `bindings.lua`.

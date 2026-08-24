@@ -107,6 +107,10 @@ The bar widget takes clicks too.
 | Right | Open the picker |
 | Middle | Next space |
 
+The picker lists every space, marks the active one, and ends with
+"Space settings", which opens the configuration app. Clicking it again reuses
+the same window rather than opening a second one.
+
 ## Beyond hotkeys
 
 Any of these commands works from a script, a terminal, or a hook. Switching is

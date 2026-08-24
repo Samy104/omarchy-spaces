@@ -197,6 +197,21 @@ Not built yet. There is no in-shell editor for the schedule, so changing rules
 means editing `spaces.json`. A custom panel would need its own Wayland layer
 window, and the Omarchy menu already gives a good picker, so that is parked.
 
+## Documentation
+
+Full docs live in [`docs/`](docs/), and are mirrored to the
+[wiki](https://github.com/Samy104/omarchy-spaces/wiki).
+
+- [Installation](docs/Installation.md)
+- [Creating a space](docs/Creating-a-space.md)
+- [Editing a space](docs/Editing-a-space.md)
+- [How notifications are routed](docs/How-notifications-are-routed.md)
+- [Hotkeys](docs/Hotkeys.md)
+- [Browser and link routing](docs/Browser-and-link-routing.md)
+- [Hooks](docs/Hooks.md)
+- [CLI reference](docs/CLI-reference.md)
+- [Troubleshooting](docs/Troubleshooting.md)
+
 ## License
 
 MIT

@@ -194,7 +194,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.8.0, running on Omarchy 4.0.0 with no QML warnings.
+Version 0.9.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -278,6 +278,7 @@ Full docs live in [`docs/`](docs/), and are mirrored to the
 - [How notifications are routed](docs/How-notifications-are-routed.md)
 - [Workspaces and windows](docs/Workspaces-and-windows.md)
 - [Appearance](docs/Appearance.md)
+- [Theming the app](docs/Theming.md)
 - [Keybinds](docs/Keybinds.md)
 - [Hotkeys](docs/Hotkeys.md)
 - [Browser and link routing](docs/Browser-and-link-routing.md)

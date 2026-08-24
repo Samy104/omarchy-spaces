@@ -14,6 +14,7 @@
 - [How notifications are routed](How-notifications-are-routed)
 - [Workspaces and windows](Workspaces-and-windows)
 - [Appearance](Appearance)
+- [Theming the app](Theming)
 - [Browser and link routing](Browser-and-link-routing)
 - [Keybinds](Keybinds)
 - [Hotkeys](Hotkeys)

@@ -22,6 +22,7 @@ matters is whether a work message should interrupt your evening.
 - [How notifications are routed](How-notifications-are-routed)
 - [Workspaces and windows](Workspaces-and-windows)
 - [Appearance](Appearance)
+- [Theming the app](Theming)
 - [Keybinds](Keybinds)
 - [Hotkeys](Hotkeys)
 - [Browser and link routing](Browser-and-link-routing)

@@ -816,6 +816,291 @@ def cmd_windows(cfg, args):
     return 0
 
 
+
+# --- discovery ---------------------------------------------------------------
+#
+# Everything the config app needs to offer a real choice instead of a text box.
+# Exposed on the CLI too, so the same lists are scriptable.
+
+DESKTOP_DIRS = [
+    os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
+                 "applications"),
+    "/usr/local/share/applications",
+    "/usr/share/applications",
+    os.path.expanduser("~/.nix-profile/share/applications"),
+]
+
+# Chromium-family browsers take --profile-directory and keep their profile list
+# in a Local State JSON file. Firefox-family browsers use profiles.ini and a
+# different flag entirely, so they are listed but offer no profiles here.
+CHROMIUM_CONFIG_DIRS = {
+    "brave": "BraveSoftware/Brave-Browser",
+    "brave-browser": "BraveSoftware/Brave-Browser",
+    "google-chrome-stable": "google-chrome",
+    "google-chrome": "google-chrome",
+    "google-chrome-beta": "google-chrome-beta",
+    "google-chrome-unstable": "google-chrome-unstable",
+    "chromium": "chromium",
+    "microsoft-edge": "microsoft-edge",
+    "microsoft-edge-stable": "microsoft-edge",
+    "vivaldi": "vivaldi",
+    "vivaldi-stable": "vivaldi",
+    "opera": "opera",
+    "thorium-browser": "thorium",
+}
+
+
+def parse_desktop(path):
+    """Minimal .desktop reader. Only the [Desktop Entry] group."""
+    out, in_entry = {}, False
+    try:
+        with open(path, errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("["):
+                    in_entry = line == "[Desktop Entry]"
+                    continue
+                if not in_entry or "=" not in line or line.startswith("#"):
+                    continue
+                k, v = line.split("=", 1)
+                out.setdefault(k.strip(), v.strip())
+    except OSError:
+        return None
+    return out
+
+
+def iter_desktop_entries():
+    seen = set()
+    for d in DESKTOP_DIRS:
+        if not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            if not name.endswith(".desktop") or name in seen:
+                continue
+            seen.add(name)
+            entry = parse_desktop(os.path.join(d, name))
+            if entry:
+                yield name, entry
+
+
+def exec_command(entry):
+    """First token of Exec, with field codes and quoting stripped."""
+    raw = entry.get("Exec", "")
+    for token in raw.split():
+        if token.startswith("%"):
+            continue
+        return token.strip('"\'')
+    return ""
+
+
+def discover_browsers():
+    """Installed browsers, one entry per executable.
+
+    A single browser often has several desktop files, because per-profile
+    launchers are a common thing to write. They all run the same executable, so
+    they are grouped by it and the most canonical entry supplies the name: the
+    one whose filename matches the command wins, then a system entry over a
+    user one. Otherwise a launcher called "Brave, work profile" would end up
+    labelling Brave itself.
+    """
+    groups = {}
+    for name, entry in iter_desktop_entries():
+        if entry.get("NoDisplay", "").lower() == "true":
+            continue
+        mimes = entry.get("MimeType", "")
+        cats = entry.get("Categories", "")
+        if "x-scheme-handler/https" not in mimes and "WebBrowser" not in cats:
+            continue
+        cmd = exec_command(entry)
+        if not cmd:
+            continue
+        base = os.path.basename(cmd)
+        stem = name[:-8] if name.endswith(".desktop") else name
+        # Higher is more canonical.
+        score = 0
+        if stem == base:
+            score += 4
+        elif stem.startswith(base):
+            score += 2
+        if "--profile-directory" not in entry.get("Exec", ""):
+            score += 1
+        candidate = {"command": base,
+                     "name": entry.get("Name", base),
+                     "desktop": name,
+                     "chromium": base in CHROMIUM_CONFIG_DIRS,
+                     "_score": score}
+        if base not in groups or score > groups[base]["_score"]:
+            groups[base] = candidate
+
+    out = []
+    for base, entry in groups.items():
+        entry.pop("_score", None)
+        out.append(entry)
+    out.sort(key=lambda b: b["name"].lower())
+    return out
+
+
+def discover_profiles(command):
+    """Profiles for a chromium-family browser, newest activity first."""
+    base = CHROMIUM_CONFIG_DIRS.get(os.path.basename(str(command or "")))
+    if not base:
+        return []
+    state = os.path.join(CONFIG_HOME, base, "Local State")
+    try:
+        with open(state) as fh:
+            cache = json.load(fh)["profile"]["info_cache"]
+    except (OSError, KeyError, json.JSONDecodeError):
+        return []
+    # Local State can hold entries with no directory on disk, left behind by a
+    # deleted profile or by a launcher passing a malformed --profile-directory.
+    # Offering those as choices would create a fresh empty profile on launch.
+    root = os.path.dirname(state)
+    out = []
+    for directory, info in cache.items():
+        if not os.path.isdir(os.path.join(root, directory)):
+            continue
+        out.append({
+            "directory": directory,
+            "name": info.get("name") or directory,
+            "email": info.get("user_name") or "",
+            "active_time": info.get("active_time") or 0,
+        })
+    out.sort(key=lambda p: (-p["active_time"], p["directory"]))
+    return out
+
+
+def discover_apps():
+    """Candidate app names for the `apps` list.
+
+    Three sources, because notification senders do not always match a desktop
+    file: installed .desktop entries, WM classes of open windows, and app names
+    already seen in Omarchy's notification history. The last one is the most
+    accurate, since it is literally what the app announced itself as.
+    """
+    seen, out = set(), []
+
+    def add(value, source):
+        v = str(value or "").strip()
+        if not v or v.lower() in seen:
+            return
+        seen.add(v.lower())
+        out.append({"name": v, "source": source})
+
+    hist = os.path.join(STATE_HOME, "omarchy", "notifications", "history")
+    if os.path.isdir(hist):
+        files = sorted(os.listdir(hist), reverse=True)[:200]
+        for f in files:
+            try:
+                with open(os.path.join(hist, f)) as fh:
+                    add(json.load(fh).get("app"), "notification")
+            except (OSError, json.JSONDecodeError):
+                continue
+
+    clients = hypr_json("clients") or []
+    for c in clients:
+        add(c.get("class"), "window")
+
+    for name, entry in iter_desktop_entries():
+        if entry.get("NoDisplay", "").lower() == "true":
+            continue
+        add(entry.get("StartupWMClass"), "desktop")
+        add(entry.get("Name"), "desktop")
+
+    return out
+
+
+def discover_themes():
+    ok, out = omarchy("theme", "list", timeout=15)
+    return [l.strip() for l in out.splitlines() if l.strip()] if ok else []
+
+
+def discover_fonts():
+    ok, out = omarchy("font", "list", timeout=15)
+    return [l.strip() for l in out.splitlines() if l.strip()] if ok else []
+
+
+def discover_backgrounds():
+    d = os.path.join(STATE_HOME, "omarchy", "current", "theme", "backgrounds")
+    if not os.path.isdir(d):
+        return []
+    return sorted(f for f in os.listdir(d)
+                  if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp")))
+
+
+def cmd_discover(cfg, args):
+    what = args[0] if args else ""
+    table = {
+        "browsers": lambda: discover_browsers(),
+        "profiles": lambda: discover_profiles(args[1] if len(args) > 1 else ""),
+        "apps": lambda: discover_apps(),
+        "themes": lambda: discover_themes(),
+        "fonts": lambda: discover_fonts(),
+        "backgrounds": lambda: discover_backgrounds(),
+    }
+    if what not in table:
+        die("usage: omarchy-spaces discover <browsers|profiles <cmd>|apps|themes|fonts|backgrounds>")
+    print(json.dumps(table[what](), indent=2))
+    return 0
+
+
+# --- import and export -------------------------------------------------------
+
+def cmd_export(cfg, args):
+    """Write the config out, to a file or stdout."""
+    payload = json.dumps(cfg, indent=2) + "\n"
+    target = next((a for a in args if not a.startswith("-")), None)
+    if not target or target == "-":
+        sys.stdout.write(payload)
+        return 0
+    target = os.path.expanduser(target)
+    with open(target, "w") as fh:
+        fh.write(payload)
+    print("wrote %s" % target)
+    return 0
+
+
+def cmd_import(cfg, args):
+    """Replace the config from a file or stdin, after validating it.
+
+    The current config is backed up first, because this replaces everything.
+    """
+    source = next((a for a in args if not a.startswith("-")), None)
+    try:
+        raw = sys.stdin.read() if (not source or source == "-") \
+            else open(os.path.expanduser(source)).read()
+    except OSError as e:
+        die("could not read: %s" % e)
+
+    try:
+        incoming = json.loads(raw)
+    except json.JSONDecodeError as e:
+        die("not valid JSON: %s" % e)
+
+    if not isinstance(incoming.get("spaces"), list) or not incoming["spaces"]:
+        die("that config has no spaces")
+    for sp in incoming["spaces"]:
+        if not isinstance(sp, dict) or not sp.get("id"):
+            die("every space needs an id")
+
+    backup = None
+    if os.path.exists(CONFIG_PATH):
+        backup = CONFIG_PATH + ".bak"
+        with open(CONFIG_PATH) as src, open(backup, "w") as dst:
+            dst.write(src.read())
+
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(incoming, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, CONFIG_PATH)
+
+    print("imported %d spaces" % len(incoming["spaces"]))
+    if backup:
+        print("previous config saved to %s" % backup)
+    return cmd_validate(incoming, [])
+
+
 MENU_BEGIN = "  // >>> omarchy-spaces managed block, do not edit by hand"
 MENU_END = "  // <<< omarchy-spaces managed block"
 MENU_PATH = os.path.join(CONFIG_HOME, "omarchy", "extensions", "omarchy-menu.jsonc")
@@ -936,6 +1221,11 @@ Appearance
   appearance capture      save the current theme, font, and background to it
   appearance apply        re-apply the pinned look
   appearance clear        stop pinning a look for this space
+
+Discovery and transfer
+  discover <what>         browsers, profiles <cmd>, apps, themes, fonts, backgrounds
+  export [path]           write the config out, stdout when no path
+  import <path>           replace the config from a file, stdin when no path
 """
 
 
@@ -946,7 +1236,8 @@ COMMANDS = {
     "install-menu": cmd_install_menu, "remove-menu": cmd_remove_menu,
     "workspace": cmd_workspace, "move-to-workspace": cmd_move_to_workspace,
     "move-to-space": cmd_move_to_space, "windows": cmd_windows,
-    "appearance": cmd_appearance,
+    "appearance": cmd_appearance, "discover": cmd_discover,
+    "export": cmd_export, "import": cmd_import,
 }
 
 

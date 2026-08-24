@@ -10,10 +10,10 @@ import qs.Ui
 // a silent desktop is never ambiguous about whether it is silent on purpose.
 BarWidget {
   id: root
-  moduleName: "spaces.omarchy-spaces"
+  moduleName: "io.github.samy104.omarchy-spaces"
 
   readonly property var spacesService: bar && bar.shell
-    ? bar.shell.serviceFor("spaces.omarchy-spaces") : null
+    ? bar.shell.serviceFor("io.github.samy104.omarchy-spaces") : null
 
   readonly property string spaceId: spacesService ? spacesService.activeSpaceId : ""
   readonly property string spaceIcon: spacesService ? spacesService.iconFor(spaceId) : ""

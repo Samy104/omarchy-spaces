@@ -18,3 +18,4 @@
 **Reference**
 - [CLI reference](CLI-reference)
 - [Troubleshooting](Troubleshooting)
+- [Publishing](Publishing)

@@ -9,7 +9,7 @@ cd omarchy-spaces
 ```
 
 `install.sh` does four things. It copies the shell plugin to
-`~/.config/omarchy/plugins/spaces.omarchy-spaces/`, installs the CLI to
+`~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces/`, installs the CLI to
 `~/.local/bin/omarchy-spaces`, writes a starter config if you have none, and
 validates it.
 
@@ -22,12 +22,12 @@ libadwaita are present. It shows up in your launcher as "Omarchy Spaces", or run
 ## Enable the bar widget
 
 ```bash
-omarchy plugin enable spaces.omarchy-spaces
+omarchy plugin enable io.github.samy104.omarchy-spaces
 omarchy restart shell
 ```
 
 The widget lands in the right section of the bar and shows the active space.
-Move it with `omarchy bar move spaces.omarchy-spaces --section left`.
+Move it with `omarchy bar move io.github.samy104.omarchy-spaces --section left`.
 
 ## Add the picker
 
@@ -77,9 +77,9 @@ spaces that do not exist. `status` prints the policy in effect right now.
 ## Uninstall
 
 ```bash
-omarchy plugin disable spaces.omarchy-spaces
+omarchy plugin disable io.github.samy104.omarchy-spaces
 omarchy-spaces remove-menu
-rm -rf ~/.config/omarchy/plugins/spaces.omarchy-spaces
+rm -rf ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces
 rm -f ~/.local/bin/omarchy-spaces ~/.local/bin/omarchy-spaces-config
 rm -f ~/.local/share/applications/omarchy-spaces-open.desktop
 rm -f ~/.local/share/applications/omarchy-spaces-config.desktop

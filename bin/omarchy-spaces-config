@@ -33,6 +33,43 @@ def run_cli(*args):
         return 1, str(e)
 
 
+
+def cli_json(*args):
+    """Run a CLI subcommand that prints JSON and parse it."""
+    code, out = run_cli(*args)
+    if code != 0:
+        return []
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError:
+        return []
+
+
+def fill_combo(row, items, current, none_label="(none)"):
+    """Populate an Adw.ComboRow and select `current`.
+
+    A value already in the config that is not in the discovered list is added
+    rather than dropped, so opening the app on a machine that is missing a
+    browser or theme never silently rewrites the config.
+    """
+    values = [none_label] + list(items)
+    cur = (current or "").strip()
+    if cur and cur not in values:
+        values.append(cur)
+    model = Gtk.StringList.new(values)
+    row.set_model(model)
+    row.set_selected(values.index(cur) if cur in values else 0)
+    return values
+
+
+def combo_value(row, none_label="(none)"):
+    item = row.get_selected_item()
+    if item is None:
+        return ""
+    text = item.get_string()
+    return "" if text == none_label else text
+
+
 def load_config():
     if not os.path.exists(CONFIG_PATH):
         run_cli("init")
@@ -159,13 +196,13 @@ class Window(Adw.ApplicationWindow):
         self.g_browser = Adw.PreferencesGroup(
             title="Browser",
             description="Links open here while this space is active.")
-        self.r_bcmd = Adw.EntryRow(title="Command")
-        self.r_bprofile = Adw.EntryRow(title="Profile directory")
-        self.r_bprofile.set_tooltip_text("The directory name on disk, such as Default or "
-                                         "Profile 1. Not the display name.")
-        for r in (self.r_bcmd, self.r_bprofile):
-            r.connect("changed", self.on_field_changed)
-            self.g_browser.add(r)
+        self.r_bcmd = Adw.ComboRow(title="Browser")
+        self.r_bprofile = Adw.ComboRow(title="Profile")
+        self.r_bprofile.set_subtitle("")
+        self.r_bcmd.connect("notify::selected", self.on_browser_changed)
+        self.r_bprofile.connect("notify::selected", self.on_field_changed)
+        self.g_browser.add(self.r_bcmd)
+        self.g_browser.add(self.r_bprofile)
         self.page.add(self.g_browser)
 
         self.g_accounts = Adw.PreferencesGroup(title="Accounts")
@@ -179,12 +216,15 @@ class Window(Adw.ApplicationWindow):
 
         self.g_apps = Adw.PreferencesGroup(
             title="Apps owned by this space",
-            description="Comma separated. Matched against the app name a program sends, "
-                        "case insensitively.")
-        self.r_apps = Adw.EntryRow(title="Apps")
-        self.r_apps.connect("changed", self.on_field_changed)
-        self.g_apps.add(self.r_apps)
+            description="Their notifications count as belonging to this space.")
+        add_app = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER,
+                             tooltip_text="Add an app")
+        add_app.add_css_class("flat")
+        add_app.connect("clicked", self.on_add_app)
+        self.g_apps.set_header_suffix(add_app)
         self.page.add(self.g_apps)
+        self.app_rows = []
+        self.apps = []
 
         self.g_ws = Adw.PreferencesGroup(
             title="Workspaces",
@@ -210,13 +250,12 @@ class Window(Adw.ApplicationWindow):
         capture.add_css_class("flat")
         capture.connect("clicked", self.on_capture_look)
         self.g_look.set_header_suffix(capture)
-        self.r_theme = Adw.EntryRow(title="Theme")
-        self.r_font = Adw.EntryRow(title="Font")
-        self.r_bg = Adw.EntryRow(title="Background")
-        self.r_bg.set_tooltip_text("A filename from the theme's backgrounds folder, "
-                                   "or an absolute path to any image.")
+        self.r_theme = Adw.ComboRow(title="Theme")
+        self.r_font = Adw.ComboRow(title="Font")
+        self.r_bg = Adw.ComboRow(title="Background")
+        self.r_bg.set_subtitle("From the current theme's backgrounds folder")
         for r in (self.r_theme, self.r_font, self.r_bg):
-            r.connect("changed", self.on_field_changed)
+            r.connect("notify::selected", self.on_field_changed)
             self.g_look.add(r)
         self.page.add(self.g_look)
 
@@ -253,8 +292,21 @@ class Window(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle(title="Omarchy Spaces", subtitle=CONFIG_PATH)
         header.set_title_widget(self.title_widget)
+        menu = Gio.Menu()
+        menu.append("Import configuration", "win.import")
+        menu.append("Export configuration", "win.export")
+        menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+
         header.pack_end(save)
         header.pack_end(validate)
+        header.pack_end(menu_button)
+
+        act = Gio.SimpleAction.new("import", None)
+        act.connect("activate", lambda *_a: self.on_import(None))
+        self.add_action(act)
+        act = Gio.SimpleAction.new("export", None)
+        act.connect("activate", lambda *_a: self.on_export(None))
+        self.add_action(act)
 
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(header)
@@ -275,10 +327,10 @@ class Window(Adw.ApplicationWindow):
         self.loading = True
         try:
             if space is None:
-                for r in (self.r_id, self.r_name, self.r_icon, self.r_color, self.r_bcmd,
-                          self.r_bprofile, self.r_email, self.r_claude, self.r_codex,
-                          self.r_apps, self.r_theme, self.r_font, self.r_bg, self.r_ws_offset):
+                for r in (self.r_id, self.r_name, self.r_icon, self.r_color,
+                          self.r_email, self.r_claude, self.r_codex, self.r_ws_offset):
                     r.set_text("")
+                self.set_apps([])
                 self.rebuild_allow([])
                 self.rebuild_windows([])
                 return
@@ -287,13 +339,16 @@ class Window(Adw.ApplicationWindow):
             self.r_icon.set_text(str(space.get("icon", "")))
             self.r_color.set_text(str(space.get("color", "")))
             browser = space.get("browser") or {}
-            self.r_bcmd.set_text(str(browser.get("command", "")))
-            self.r_bprofile.set_text(str(browser.get("profile", "")))
+            self.browsers = cli_json("discover", "browsers")
+            fill_combo(self.r_bcmd,
+                       [b["command"] for b in self.browsers],
+                       str(browser.get("command", "")))
+            self.refresh_profiles(str(browser.get("profile", "")))
             self.r_email.set_text(str(space.get("email", "")))
             assistants = space.get("assistants") or {}
             self.r_claude.set_text(str(assistants.get("claude", "")))
             self.r_codex.set_text(str(assistants.get("codex", "")))
-            self.r_apps.set_text(", ".join(space.get("apps") or []))
+            self.set_apps(space.get("apps") or [])
             ws = space.get("workspaces") or {}
             count = int(ws.get("count", 10))
             self.r_ws_count.set_value(count)
@@ -303,9 +358,9 @@ class Window(Adw.ApplicationWindow):
             self.r_ws_range.set_subtitle("real workspaces %d to %d" % (offset + 1, offset + count))
 
             look = space.get("appearance") or {}
-            self.r_theme.set_text(str(look.get("theme", "")))
-            self.r_font.set_text(str(look.get("font", "")))
-            self.r_bg.set_text(str(look.get("background", "")))
+            fill_combo(self.r_theme, cli_json("discover", "themes"), str(look.get("theme", "")))
+            fill_combo(self.r_font, cli_json("discover", "fonts"), str(look.get("font", "")))
+            fill_combo(self.r_bg, cli_json("discover", "backgrounds"), str(look.get("background", "")))
 
             notif = space.get("notifications") or {}
             self.r_unassigned.set_active(notif.get("allowUnassigned") is not False)
@@ -414,11 +469,11 @@ class Window(Adw.ApplicationWindow):
         space["icon"] = self.r_icon.get_text().strip()
         space["color"] = self.r_color.get_text().strip()
 
-        cmd = self.r_bcmd.get_text().strip()
+        cmd = combo_value(self.r_bcmd)
         if cmd:
             browser = space.get("browser") or {}
             browser["command"] = cmd
-            profile = self.r_bprofile.get_text().strip()
+            profile = combo_value(self.r_bprofile)
             if profile:
                 browser["profile"] = profile
             else:
@@ -438,8 +493,7 @@ class Window(Adw.ApplicationWindow):
         else:
             space.pop("assistants", None)
 
-        apps = [a.strip() for a in self.r_apps.get_text().split(",")]
-        space["apps"] = [a for a in apps if a]
+        space["apps"] = list(self.apps)
 
         ws = space.get("workspaces") or {}
         ws["count"] = int(self.r_ws_count.get_value())
@@ -451,12 +505,12 @@ class Window(Adw.ApplicationWindow):
         space["workspaces"] = ws
 
         look = {}
-        if self.r_theme.get_text().strip():
-            look["theme"] = self.r_theme.get_text().strip()
-        if self.r_font.get_text().strip():
-            look["font"] = self.r_font.get_text().strip()
-        if self.r_bg.get_text().strip():
-            look["background"] = self.r_bg.get_text().strip()
+        if combo_value(self.r_theme):
+            look["theme"] = combo_value(self.r_theme)
+        if combo_value(self.r_font):
+            look["font"] = combo_value(self.r_font)
+        if combo_value(self.r_bg):
+            look["background"] = combo_value(self.r_bg)
         if look:
             space["appearance"] = look
         else:
@@ -565,6 +619,177 @@ class Window(Adw.ApplicationWindow):
             self.notify("Saved. " + out)
         else:
             self.notify("Saved with warnings, see Validate")
+
+
+    # --- profiles, apps, transfer -------------------------------------------
+
+    def refresh_profiles(self, current=""):
+        """Repopulate the profile list for whichever browser is selected.
+
+        Firefox-family browsers do not take --profile-directory, so the row is
+        disabled rather than offering choices that would not work.
+        """
+        cmd = combo_value(self.r_bcmd)
+        entry = next((b for b in getattr(self, "browsers", []) if b["command"] == cmd), None)
+        if not cmd:
+            fill_combo(self.r_bprofile, [], "")
+            self.r_bprofile.set_sensitive(False)
+            self.r_bprofile.set_subtitle("Pick a browser first")
+            return
+        if entry is not None and not entry.get("chromium", False):
+            fill_combo(self.r_bprofile, [], "")
+            self.r_bprofile.set_sensitive(False)
+            self.r_bprofile.set_subtitle("This browser does not support --profile-directory")
+            return
+
+        profiles = cli_json("discover", "profiles", cmd)
+        labels = [p["directory"] for p in profiles]
+        fill_combo(self.r_bprofile, labels, current)
+        self.r_bprofile.set_sensitive(True)
+        if profiles:
+            described = ", ".join("%s is %s" % (p["directory"], p["name"]) for p in profiles[:3])
+            self.r_bprofile.set_subtitle(described)
+        else:
+            self.r_bprofile.set_subtitle("No profiles found, has this browser been run?")
+
+    def on_browser_changed(self, *_a):
+        if self.loading:
+            return
+        self.refresh_profiles(combo_value(self.r_bprofile))
+        self.on_field_changed()
+
+    def set_apps(self, apps):
+        for row in self.app_rows:
+            self.g_apps.remove(row)
+        self.app_rows = []
+        self.apps = list(apps)
+        if not self.apps:
+            row = Adw.ActionRow(title="No apps",
+                                subtitle="Notifications from unlisted apps count as unassigned")
+            row.set_sensitive(False)
+            self.g_apps.add(row)
+            self.app_rows.append(row)
+            return
+        for name in self.apps:
+            row = Adw.ActionRow(title=name)
+            btn = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
+            btn.add_css_class("flat")
+            btn.connect("clicked", lambda _b, n=name: self.remove_app(n))
+            row.add_suffix(btn)
+            self.g_apps.add(row)
+            self.app_rows.append(row)
+
+    def remove_app(self, name):
+        self.apps = [a for a in self.apps if a != name]
+        self.set_apps(self.apps)
+        self.on_field_changed()
+
+    def on_add_app(self, _b):
+        """Searchable picker over apps this machine actually knows about.
+
+        Names seen in notification history come first, because that is literally
+        what the app announced itself as, which is what the matching uses.
+        """
+        candidates = cli_json("discover", "apps")
+        taken = {a.lower() for a in self.apps}
+        candidates = [c for c in candidates if c["name"].lower() not in taken]
+
+        win = Adw.Window(transient_for=self, modal=True, title="Add an app",
+                         default_width=460, default_height=520)
+        search = Gtk.SearchEntry(placeholder_text="Search apps", hexpand=True)
+        listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        listbox.add_css_class("boxed-list")
+        listbox.set_margin_start(12)
+        listbox.set_margin_end(12)
+        listbox.set_margin_bottom(12)
+
+        SOURCE_LABEL = {"notification": "seen in notifications",
+                        "window": "open window",
+                        "desktop": "installed"}
+
+        def choose(name):
+            if name and name.lower() not in {a.lower() for a in self.apps}:
+                self.apps.append(name)
+                self.set_apps(self.apps)
+                self.on_field_changed()
+            win.close()
+
+        for c in candidates:
+            row = Adw.ActionRow(title=c["name"], subtitle=SOURCE_LABEL.get(c["source"], ""))
+            row.set_activatable(True)
+            row.connect("activated", lambda _r, n=c["name"]: choose(n))
+            listbox.append(row)
+
+        def do_filter(row):
+            text = search.get_text().strip().lower()
+            return not text or text in row.get_title().lower()
+
+        listbox.set_filter_func(do_filter)
+        search.connect("search-changed", lambda _e: listbox.invalidate_filter())
+
+        def add_typed(_e):
+            text = search.get_text().strip()
+            if text:
+                choose(text)
+
+        search.connect("activate", add_typed)
+
+        header = Adw.HeaderBar()
+        header.set_title_widget(search)
+
+        scroll = Gtk.ScrolledWindow(vexpand=True, child=listbox)
+        hint = Gtk.Label(
+            label="Not listed? Type the name and press Enter.",
+            margin_top=6, margin_bottom=10)
+        hint.add_css_class("dim-label")
+        hint.add_css_class("caption")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(scroll)
+        box.append(hint)
+
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(header)
+        toolbar.set_content(box)
+        win.set_content(toolbar)
+        win.present()
+
+    def on_export(self, _b):
+        self.collect()
+        save_config(self.cfg)
+        chooser = Gtk.FileDialog(title="Export configuration",
+                                 initial_name="omarchy-spaces.json")
+
+        def done(dialog, result):
+            try:
+                gfile = dialog.save_finish(result)
+            except GLib.Error:
+                return
+            code, out = run_cli("export", gfile.get_path())
+            self.notify(out if code else "Exported to " + gfile.get_path())
+
+        chooser.save(self, None, done)
+
+    def on_import(self, _b):
+        chooser = Gtk.FileDialog(title="Import configuration")
+
+        def done(dialog, result):
+            try:
+                gfile = dialog.open_finish(result)
+            except GLib.Error:
+                return
+            code, out = run_cli("import", gfile.get_path())
+            if code not in (0, 1):
+                self.notify(out.splitlines()[0] if out else "Import failed")
+                return
+            self.cfg = load_config()
+            self.selected = 0
+            self.refresh_sidebar()
+            self.load_selected()
+            run_cli("install-menu")
+            self.notify("Imported. Previous config saved as spaces.json.bak")
+
+        chooser.open(self, None, done)
 
     def on_capture_look(self, _b):
         """Save whatever the desktop looks like right now into this space.

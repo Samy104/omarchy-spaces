@@ -172,6 +172,45 @@ function browserCommand(config, spaceId, url) {
   return argv
 }
 
+
+// Hyprland workspace ranges. Mirrors ws_count and ws_offset in
+// bin/omarchy-spaces; test/parity.sh checks both agree.
+var DEFAULT_WS_COUNT = 10
+
+function wsCount(config, spaceId) {
+  var space = findSpace(config, spaceId)
+  if (!space) return DEFAULT_WS_COUNT
+  var ws = space.workspaces || {}
+  var n = parseInt(ws.count, 10)
+  return isFinite(n) && n > 0 ? n : DEFAULT_WS_COUNT
+}
+
+function wsOffset(config, spaceId) {
+  var space = findSpace(config, spaceId)
+  if (!space) return 0
+  var ws = space.workspaces || {}
+  if (ws.offset !== undefined && ws.offset !== null) {
+    var o = parseInt(ws.offset, 10)
+    return isFinite(o) ? o : 0
+  }
+  var idx = spaceIds(config).indexOf(String(spaceId))
+  if (idx < 0) idx = 0
+  return idx * wsCount(config, spaceId)
+}
+
+// Which space owns a real workspace id, and which slot it is.
+function slotForReal(config, realId) {
+  var ids = spaceIds(config)
+  for (var i = 0; i < ids.length; i++) {
+    var off = wsOffset(config, ids[i])
+    var count = wsCount(config, ids[i])
+    if (realId > off && realId <= off + count) {
+      return { space: ids[i], slot: realId - off }
+    }
+  }
+  return null
+}
+
 var api = {
   DAY_MINUTES: DAY_MINUTES,
   parseTime: parseTime,
@@ -184,7 +223,11 @@ var api = {
   resolvePolicy: resolvePolicy,
   isFullyMuted: isFullyMuted,
   shouldShow: shouldShow,
-  browserCommand: browserCommand
+  browserCommand: browserCommand,
+  DEFAULT_WS_COUNT: DEFAULT_WS_COUNT,
+  wsCount: wsCount,
+  wsOffset: wsOffset,
+  slotForReal: slotForReal
 }
 
 if (typeof module !== "undefined" && module.exports) module.exports = api

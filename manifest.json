@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "spaces.omarchy-spaces",
+  "id": "io.github.samy104.omarchy-spaces",
   "name": "Omarchy Spaces",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Samy Lemcelli",
   "description": "Context spaces for Omarchy. Each space owns its browser profile, email, assistant accounts, and notification policy.",
   "kinds": [
@@ -36,5 +36,6 @@
         "label": "Show a dot when notifications are being filtered"
       }
     ]
-  }
+  },
+  "license": "MIT"
 }

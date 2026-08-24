@@ -87,7 +87,7 @@ Omarchy changed any of them.
 git clone https://github.com/Samy104/omarchy-spaces.git
 cd omarchy-spaces
 ./install.sh --with-url-handler
-omarchy plugin enable spaces.omarchy-spaces
+omarchy plugin enable io.github.samy104.omarchy-spaces
 omarchy restart shell
 ```
 
@@ -192,7 +192,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.2.0, running on Omarchy 4.0.0 with no QML warnings.
+Version 0.3.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -206,8 +206,51 @@ and a pinned theme is applied on switch.
 
 `omarchy-spaces-config` is a GTK4 and libadwaita editor for all of it.
 
-Known rough edge. Omarchy's workspace widget shows real workspace ids, so in the
-work space the bar reads 11 to 20 while you press 1 to 0.
+The bar ships its own workspace widget so the numbers shown match the numbers
+you press. Omarchy's stock widget prints real ids, which read 11 to 20 in the
+work space.
+
+Audited against the Omarchy plugin
+[develop](https://omarchyplugins.com/develop.html) and
+[publish](https://omarchyplugins.com/publish.html) guidelines. See
+[Publishing](docs/Publishing.md).
+
+## Requirements
+
+Omarchy 4.0.0 or newer, and python3, which Omarchy already ships.
+
+The configuration app additionally needs `python-gobject`, `gtk4`, and
+`libadwaita`. `install.sh` skips it when they are absent, and everything else
+keeps working.
+
+Nothing here needs root. There is no sudo, no system directory is touched, and
+every file is written under `$HOME`. The plugin runs inside the Omarchy shell
+process with your user's permissions, unsandboxed, like every Omarchy plugin.
+
+The CLI shells out to `hyprctl` for workspaces, and to `omarchy theme`,
+`omarchy font`, and `omarchy theme bg` for appearance.
+
+## Removal
+
+```bash
+omarchy plugin disable io.github.samy104.omarchy-spaces
+omarchy plugin disable io.github.samy104.spaces-workspaces
+omarchy plugin enable omarchy.workspaces
+omarchy-spaces remove-menu
+rm -rf ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces
+rm -rf ~/.config/omarchy/plugins/io.github.samy104.spaces-workspaces
+rm -f ~/.local/bin/omarchy-spaces ~/.local/bin/omarchy-spaces-config
+rm -f ~/.local/share/applications/omarchy-spaces-open.desktop
+rm -f ~/.local/share/applications/omarchy-spaces-config.desktop
+xdg-settings set default-web-browser brave-browser.desktop
+```
+
+Remove the Omarchy Spaces block from `~/.config/hypr/bindings.lua`, then
+`hyprctl reload`.
+
+Your config at `~/.config/omarchy-spaces/` is left in place. Delete it for a
+clean slate. Export it first with `omarchy-spaces export ~/spaces-backup.json`
+if you might come back.
 
 ## Documentation
 
@@ -225,6 +268,7 @@ Full docs live in [`docs/`](docs/), and are mirrored to the
 - [Hooks](docs/Hooks.md)
 - [CLI reference](docs/CLI-reference.md)
 - [Troubleshooting](docs/Troubleshooting.md)
+- [Publishing](docs/Publishing.md)
 
 ## License
 

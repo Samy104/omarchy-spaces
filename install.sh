@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ID="spaces.omarchy-spaces"
+PLUGIN_ID="io.github.samy104.omarchy-spaces"
 PLUGIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$PLUGIN_ID"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
@@ -14,6 +14,11 @@ say() { printf '  %s\n' "$*"; }
 say "installing plugin to $PLUGIN_DIR"
 mkdir -p "$PLUGIN_DIR"
 cp -f "$REPO_DIR"/manifest.json "$REPO_DIR"/*.qml "$REPO_DIR"/SpacesLogic.js "$PLUGIN_DIR/"
+
+WS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.samy104.spaces-workspaces"
+say "installing workspace widget to $WS_DIR"
+mkdir -p "$WS_DIR"
+cp -f "$REPO_DIR"/workspaces/* "$WS_DIR/"
 
 say "installing CLI to $BIN_DIR/omarchy-spaces"
 mkdir -p "$BIN_DIR"
@@ -52,4 +57,6 @@ say "validating config"
 
 say "done. Enable the bar widget with:"
 say "  omarchy plugin enable $PLUGIN_ID"
+say "  omarchy plugin enable io.github.samy104.spaces-workspaces   # replaces omarchy.workspaces"
+say "  omarchy plugin disable omarchy.workspaces"
 say "  omarchy restart shell"

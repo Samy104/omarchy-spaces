@@ -22,6 +22,7 @@ matters is whether a work message should interrupt your evening.
 - [CLI reference](CLI-reference)
 - [Hooks](Hooks)
 - [Troubleshooting](Troubleshooting)
+- [Publishing](Publishing)
 
 ## What a space controls
 

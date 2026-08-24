@@ -19,7 +19,7 @@ omarchy plugin list | grep spaces
 If it says `disabled`:
 
 ```bash
-omarchy plugin enable spaces.omarchy-spaces
+omarchy plugin enable io.github.samy104.omarchy-spaces
 omarchy restart shell
 ```
 

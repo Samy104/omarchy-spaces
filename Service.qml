@@ -55,6 +55,14 @@ Item {
 
   readonly property bool fullyMuted: Logic.isFullyMuted(policy)
 
+  // Workspace range of the active space, read by the Spaces workspace widget
+  // so the bar can show slot numbers instead of real Hyprland ids.
+  readonly property bool workspaceIsolation: !(config && config.workspaceIsolation === false)
+  readonly property int wsOffset: Logic.wsOffset(config, activeSpaceId)
+  readonly property int wsCount: Logic.wsCount(config, activeSpaceId)
+
+  function slotForReal(realId) { return Logic.slotForReal(config, realId) }
+
   readonly property var notificationService: shell ? shell.serviceFor("omarchy.notifications") : null
 
   signal spaceChanged(string spaceId)
@@ -220,7 +228,7 @@ Item {
   Process {
     id: ensureDirs
     command: ["bash", "-c", "mkdir -p " + JSON.stringify(service.configDir) + " " + JSON.stringify(service.stateDir)]
-    onExited: {
+    onExited: function () {
       configProbe.running = true
       activeProbe.running = true
     }

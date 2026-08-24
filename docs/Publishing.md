@@ -23,19 +23,40 @@ official [develop](https://omarchyplugins.com/develop.html) and
 | Public repo, LICENSE, preview image | yes |
 | No `omarchy.clonedFrom` key | verified |
 
-## Two plugins, one repository
+## Why there are two plugin folders
 
-The repository ships two plugin folders.
+This is one package. It ships two plugin directories because Omarchy's
+third-party scanner allows exactly one manifest per top-level folder:
 
-`io.github.samy104.omarchy-spaces` is the main plugin, and its manifest is in
-the repo root, which is what the marketplace reads.
+```bash
+scan_thirdparty() {
+  for sub in "$dir"/*/; do
+    [[ -f "$sub/manifest.json" ]] || continue
+    emit_manifest thirdparty "$sub/manifest.json"
+  done
+}
+```
 
-`io.github.samy104.spaces-workspaces` is the workspace widget, in
-`workspaces/`. It is optional and only useful alongside the main plugin, so it
-is not listed separately. `install.sh` installs both.
+First-party plugins get a wider scan, `find -mindepth 2 -maxdepth 3` matching
+`*.manifest.json`, which is how `omarchy.bar` ships Clock, Tray, and Workspaces
+from one source directory. Third-party plugins do not. A sibling manifest
+placed in a third-party folder is silently ignored, which I confirmed by adding
+one and rescanning.
 
-If the marketplace ever requires one plugin per repository, the widget moves to
-its own repo without any code change.
+One bar widget per plugin id is also how Omarchy does it internally. Its own
+workspace widget is `omarchy.workspaces`, separate from `omarchy.bar`.
+
+So two bar widgets, the space indicator and the workspace slots, means two
+directories. It is a scanner constraint, not a packaging decision.
+
+They behave as one package. Same repository, same version, installed by the
+same script, enabled together by `install.sh`, and removed together. The
+workspace widget declares in its description that it requires the main plugin,
+and falls back to real workspace ids if the main plugin is missing rather than
+breaking.
+
+Only the main plugin is submitted to the marketplace. Its manifest is in the
+repo root, which is what the marketplace reads.
 
 ## No panel kind
 

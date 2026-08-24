@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.samy104.spaces-workspaces",
-  "name": "Spaces workspaces",
-  "version": "0.3.0",
+  "id": "io.github.samy104.omarchy-spaces-workspaces",
+  "name": "Omarchy Spaces workspaces",
+  "version": "0.4.0",
   "author": "Samy Lemcelli",
-  "description": "Workspace indicators numbered by slot within the active space",
+  "description": "Companion widget for Omarchy Spaces. Numbers workspaces by slot within the active space. Requires io.github.samy104.omarchy-spaces.",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Spaces workspaces",
-    "description": "Workspace numbers scoped to the active space, so work shows 1 to 10 rather than 11 to 20",
+    "description": "Part of Omarchy Spaces. Shows 1 to 10 in every space instead of the real ids, which read 11 to 20 in the second space.",
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "left",

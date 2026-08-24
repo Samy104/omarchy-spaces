@@ -15,7 +15,7 @@ import qs.Ui
 // turned off, which makes it a safe drop-in replacement either way.
 BarWidget {
   id: root
-  moduleName: "io.github.samy104.spaces-workspaces"
+  moduleName: "io.github.samy104.omarchy-spaces-workspaces"
 
   readonly property var spacesService: bar && bar.shell
     ? bar.shell.serviceFor("io.github.samy104.omarchy-spaces") : null

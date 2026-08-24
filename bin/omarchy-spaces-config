@@ -108,6 +108,7 @@ class Window(Adw.ApplicationWindow):
         self.selected = 0
         self.dirty = False
         self.loading = False
+        self.showing_general = False
 
         self.toast = Adw.ToastOverlay()
         self.set_content(self.toast)
@@ -120,15 +121,41 @@ class Window(Adw.ApplicationWindow):
 
         self.refresh_sidebar()
         self.load_selected()
+        # Open on General. GTK selects the first focusable row when the window
+        # is mapped, and General is that row, so this makes the landing page
+        # deliberate rather than a side effect of widget order.
+        self.general_list.select_row(self.general_list.get_row_at_index(0))
 
     # --- sidebar ------------------------------------------------------------
 
     def _build_sidebar(self):
+        # Settings that belong to the whole config rather than one space, kept
+        # above the list so it reads as a heading rather than a peer of the
+        # spaces below it.
+        self.general_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        self.general_list.add_css_class("navigation-sidebar")
+        general_row = Adw.ActionRow(title="General")
+        icon = Gtk.Label(label="\u2699")
+        icon.add_css_class("title-3")
+        general_row.add_prefix(icon)
+        self.general_list.append(general_row)
+        self.general_list.connect("row-selected", self.on_general_selected)
+
+        heading = Gtk.Label(label="Spaces", xalign=0, margin_start=12,
+                            margin_top=10, margin_bottom=4)
+        heading.add_css_class("heading")
+        heading.add_css_class("dim-label")
+
         self.space_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.space_list.add_css_class("navigation-sidebar")
         self.space_list.connect("row-selected", self.on_space_selected)
 
-        scroll = Gtk.ScrolledWindow(vexpand=True, child=self.space_list)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        inner.append(self.general_list)
+        inner.append(heading)
+        inner.append(self.space_list)
+
+        scroll = Gtk.ScrolledWindow(vexpand=True, child=inner)
 
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add a space")
         add.connect("clicked", self.on_add_space)
@@ -146,7 +173,7 @@ class Window(Adw.ApplicationWindow):
         box.append(actions)
 
         header = Adw.HeaderBar()
-        header.set_title_widget(Adw.WindowTitle(title="Spaces"))
+        header.set_title_widget(Adw.WindowTitle(title="Omarchy Spaces"))
 
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(header)
@@ -308,10 +335,138 @@ class Window(Adw.ApplicationWindow):
         act.connect("activate", lambda *_a: self.on_export(None))
         self.add_action(act)
 
+        self.stack = Gtk.Stack()
+        self.stack.add_named(self.page, "space")
+        self.stack.add_named(self._build_general_page(), "general")
+        self.stack.set_visible_child_name("space")
+
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(header)
-        toolbar.set_content(self.page)
+        toolbar.set_content(self.stack)
         return Adw.NavigationPage(title="Edit", child=toolbar)
+
+    def _build_general_page(self):
+        """Settings that apply to the whole config, not to one space."""
+        page = Adw.PreferencesPage()
+
+        behaviour = Adw.PreferencesGroup(
+            title="Behaviour",
+            description="What a space switch actually changes.")
+
+        self.g_isolation = Adw.SwitchRow(
+            title="Isolate windows per space",
+            subtitle="Each space owns a range of real Hyprland workspaces")
+        self.g_appearance = Adw.SwitchRow(
+            title="Apply appearance on switch",
+            subtitle="Theme, font, and background pinned to the space")
+        self.g_critical = Adw.SwitchRow(
+            title="Let critical notifications through",
+            subtitle="Low battery and disk full ignore space filtering")
+        self.g_switch_notify = Adw.SwitchRow(
+            title="Notify on switch",
+            subtitle="A toast naming the space you moved to")
+        for r in (self.g_isolation, self.g_appearance, self.g_critical, self.g_switch_notify):
+            r.connect("notify::active", self.on_general_changed)
+            behaviour.add(r)
+        page.add(behaviour)
+
+        default = Adw.PreferencesGroup(
+            title="Default space",
+            description="Used on a fresh machine, before anything has been switched to.")
+        self.g_default = Adw.ComboRow(title="Space")
+        self.g_default.connect("notify::selected", self.on_general_changed)
+        default.add(self.g_default)
+        page.add(default)
+
+        menu = Adw.PreferencesGroup(
+            title="Omarchy menu",
+            description="Adds a Spaces submenu with one row per space, "
+                        "reachable with SUPER + ALT + O.")
+        add_row = Adw.ActionRow(title="Add the Spaces rows",
+                                subtitle="Rewrites a delimited block, your own entries are untouched")
+        add_btn = Gtk.Button(label="Install", valign=Gtk.Align.CENTER)
+        add_btn.connect("clicked", lambda _b: self.run_and_toast("install-menu"))
+        add_row.add_suffix(add_btn)
+        remove_row = Adw.ActionRow(title="Remove them")
+        remove_btn = Gtk.Button(label="Remove", valign=Gtk.Align.CENTER)
+        remove_btn.add_css_class("destructive-action")
+        remove_btn.connect("clicked", lambda _b: self.run_and_toast("remove-menu"))
+        remove_row.add_suffix(remove_btn)
+        menu.add(add_row)
+        menu.add(remove_row)
+        page.add(menu)
+
+        transfer = Adw.PreferencesGroup(
+            title="Configuration",
+            description="The whole file, every space and every rule.")
+        exp = Adw.ActionRow(title="Export", subtitle="Write this configuration to a file")
+        exp_btn = Gtk.Button(label="Export", valign=Gtk.Align.CENTER)
+        exp_btn.connect("clicked", self.on_export)
+        exp.add_suffix(exp_btn)
+        imp = Adw.ActionRow(title="Import",
+                            subtitle="Replace everything, the current file is backed up first")
+        imp_btn = Gtk.Button(label="Import", valign=Gtk.Align.CENTER)
+        imp_btn.connect("clicked", self.on_import)
+        imp.add_suffix(imp_btn)
+        transfer.add(exp)
+        transfer.add(imp)
+        page.add(transfer)
+
+        self.g_paths = Adw.PreferencesGroup(title="Files")
+        self.g_paths.add(Adw.ActionRow(title="Configuration", subtitle=CONFIG_PATH))
+        self.g_paths.add(Adw.ActionRow(
+            title="Active space",
+            subtitle=os.path.join(
+                os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                "omarchy-spaces", "active")))
+        page.add(self.g_paths)
+
+        return page
+
+    def run_and_toast(self, *args):
+        code, out = run_cli(*args)
+        self.notify(out.splitlines()[0] if out else ("Done" if code == 0 else "Failed"))
+
+    def load_general(self):
+        self.loading = True
+        try:
+            self.g_isolation.set_active(self.cfg.get("workspaceIsolation") is not False)
+            self.g_appearance.set_active(self.cfg.get("applyAppearance") is not False)
+            self.g_critical.set_active(self.cfg.get("criticalBypass") is not False)
+            self.g_switch_notify.set_active(self.cfg.get("switchNotification") is not False)
+            ids = [str(s.get("id")) for s in self.cfg.get("spaces", []) if s.get("id")]
+            fill_combo(self.g_default, ids, str(self.cfg.get("activeSpace", "")))
+        finally:
+            self.loading = False
+
+    def collect_general(self):
+        self.cfg["workspaceIsolation"] = self.g_isolation.get_active()
+        self.cfg["applyAppearance"] = self.g_appearance.get_active()
+        self.cfg["criticalBypass"] = self.g_critical.get_active()
+        self.cfg["switchNotification"] = self.g_switch_notify.get_active()
+        chosen = combo_value(self.g_default)
+        if chosen:
+            self.cfg["activeSpace"] = chosen
+        else:
+            self.cfg.pop("activeSpace", None)
+
+    def on_general_changed(self, *_a):
+        if self.loading:
+            return
+        self.dirty = True
+
+    def on_general_selected(self, _list, row):
+        if row is None or self.loading:
+            return
+        if self.showing_general:
+            return
+        self.collect()
+        self.showing_general = True
+        self.space_list.unselect_all()
+        self.load_general()
+        self.stack.set_visible_child_name("general")
+        self.title_widget.set_title("General")
+        self.title_widget.set_subtitle("Settings for every space")
 
     # --- data binding -------------------------------------------------------
 
@@ -461,6 +616,9 @@ class Window(Adw.ApplicationWindow):
     # --- collecting ---------------------------------------------------------
 
     def collect(self):
+        if self.showing_general:
+            self.collect_general()
+            return
         space = self.current_space()
         if space is None:
             return
@@ -550,11 +708,18 @@ class Window(Adw.ApplicationWindow):
         if row is None or self.loading:
             return
         idx = row.get_index()
-        if idx == self.selected:
+        if idx == self.selected and not self.showing_general:
             return
-        self.collect()
+        if self.showing_general:
+            self.collect_general()
+            self.showing_general = False
+            self.general_list.unselect_all()
+            self.stack.set_visible_child_name("space")
+        else:
+            self.collect()
         self.selected = idx
         self.load_selected()
+        self.title_widget.set_subtitle(CONFIG_PATH)
 
     def on_add_space(self, _b):
         self.collect()

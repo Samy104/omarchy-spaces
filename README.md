@@ -192,7 +192,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.3.0, running on Omarchy 4.0.0 with no QML warnings.
+Version 0.4.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -207,7 +207,9 @@ and a pinned theme is applied on switch.
 `omarchy-spaces-config` is a GTK4 and libadwaita editor for all of it.
 
 The bar ships its own workspace widget so the numbers shown match the numbers
-you press. Omarchy's stock widget prints real ids, which read 11 to 20 in the
+you press. It is a second plugin directory only because Omarchy's third-party
+scanner reads one manifest per folder. It installs, enables, and uninstalls
+with the main plugin as one package. Omarchy's stock widget prints real ids, which read 11 to 20 in the
 work space.
 
 Audited against the Omarchy plugin
@@ -234,11 +236,11 @@ The CLI shells out to `hyprctl` for workspaces, and to `omarchy theme`,
 
 ```bash
 omarchy plugin disable io.github.samy104.omarchy-spaces
-omarchy plugin disable io.github.samy104.spaces-workspaces
+omarchy plugin disable io.github.samy104.omarchy-spaces-workspaces
 omarchy plugin enable omarchy.workspaces
 omarchy-spaces remove-menu
 rm -rf ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces
-rm -rf ~/.config/omarchy/plugins/io.github.samy104.spaces-workspaces
+rm -rf ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces-workspaces
 rm -f ~/.local/bin/omarchy-spaces ~/.local/bin/omarchy-spaces-config
 rm -f ~/.local/share/applications/omarchy-spaces-open.desktop
 rm -f ~/.local/share/applications/omarchy-spaces-config.desktop

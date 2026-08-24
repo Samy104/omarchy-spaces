@@ -15,7 +15,7 @@ say "installing plugin to $PLUGIN_DIR"
 mkdir -p "$PLUGIN_DIR"
 cp -f "$REPO_DIR"/manifest.json "$REPO_DIR"/*.qml "$REPO_DIR"/SpacesLogic.js "$PLUGIN_DIR/"
 
-WS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.samy104.spaces-workspaces"
+WS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.samy104.omarchy-spaces-workspaces"
 say "installing workspace widget to $WS_DIR"
 mkdir -p "$WS_DIR"
 cp -f "$REPO_DIR"/workspaces/* "$WS_DIR/"
@@ -55,8 +55,21 @@ fi
 say "validating config"
 "$BIN_DIR/omarchy-spaces" validate || true
 
-say "done. Enable the bar widget with:"
-say "  omarchy plugin enable $PLUGIN_ID"
-say "  omarchy plugin enable io.github.samy104.spaces-workspaces   # replaces omarchy.workspaces"
-say "  omarchy plugin disable omarchy.workspaces"
-say "  omarchy restart shell"
+# Omarchy discovers exactly one manifest per third-party plugin directory, so a
+# second bar widget has to live in its own folder. They are one package: same
+# repo, same version, installed, enabled, and removed together.
+WS_ID="io.github.samy104.omarchy-spaces-workspaces"
+
+if [ "${OMARCHY_SPACES_NO_ENABLE:-}" = "1" ]; then
+  say "skipping enable, OMARCHY_SPACES_NO_ENABLE is set"
+else
+  say "enabling"
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  sleep 1
+  omarchy plugin enable "$PLUGIN_ID" >/dev/null 2>&1 || say "  enable $PLUGIN_ID failed, run it by hand"
+  omarchy plugin enable "$WS_ID" >/dev/null 2>&1 || say "  enable $WS_ID failed, run it by hand"
+  omarchy plugin disable omarchy.workspaces >/dev/null 2>&1 || true
+  say "  enabled, and Omarchy's own workspace widget disabled in favour of ours"
+fi
+
+say "done. Apply with: omarchy restart shell"

@@ -11,6 +11,30 @@ APP_DIR="$HOME/.local/share/applications"
 
 say() { printf '  %s\n' "$*"; }
 
+# Nothing outside this plugin's own files is touched unless asked for.
+WITH_URL_HANDLER=0
+REPLACE_WORKSPACES=0
+for arg in "$@"; do
+  case "$arg" in
+    --with-url-handler)   WITH_URL_HANDLER=1 ;;
+    --replace-workspaces) REPLACE_WORKSPACES=1 ;;
+    --all)                WITH_URL_HANDLER=1; REPLACE_WORKSPACES=1 ;;
+    -h|--help)
+      cat <<'USAGE'
+./install.sh [options]
+
+  --with-url-handler     make links open in the active space's browser profile
+                         (reassigns your default browser)
+  --replace-workspaces   use the slot-numbered workspace widget instead of
+                         Omarchy's own (disables omarchy.workspaces)
+  --all                  both of the above
+
+With no options nothing outside this plugin is changed.
+USAGE
+      exit 0 ;;
+  esac
+done
+
 say "installing plugin to $PLUGIN_DIR"
 mkdir -p "$PLUGIN_DIR"
 cp -f "$REPO_DIR"/manifest.json "$REPO_DIR"/*.qml "$REPO_DIR"/SpacesLogic.js "$PLUGIN_DIR/"
@@ -57,7 +81,7 @@ else
   say "config already exists, leaving it alone"
 fi
 
-if [ "${1:-}" = "--with-url-handler" ]; then
+if [ "$WITH_URL_HANDLER" = "1" ]; then
   say "installing URL handler and making it the default browser"
   mkdir -p "$APP_DIR"
   install -m 0644 "$REPO_DIR/share/omarchy-spaces-open.desktop" "$APP_DIR/omarchy-spaces-open.desktop"
@@ -83,9 +107,20 @@ else
   omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
   sleep 1
   omarchy plugin enable "$PLUGIN_ID" >/dev/null 2>&1 || say "  enable $PLUGIN_ID failed, run it by hand"
-  omarchy plugin enable "$WS_ID" >/dev/null 2>&1 || say "  enable $WS_ID failed, run it by hand"
-  omarchy plugin disable omarchy.workspaces >/dev/null 2>&1 || true
-  say "  enabled, and Omarchy's own workspace widget disabled in favour of ours"
+
+  # The workspace widget replaces Omarchy's own, and turning off someone
+  # else's widget is not something an installer should decide. Enabling ours
+  # while theirs is still on would show two rows of numbers, so it waits to
+  # be asked.
+  if [ "$REPLACE_WORKSPACES" = "1" ]; then
+    omarchy plugin enable "$WS_ID" >/dev/null 2>&1 || say "  enable $WS_ID failed, run it by hand"
+    omarchy plugin disable omarchy.workspaces >/dev/null 2>&1 || true
+    say "  workspace widget swapped in, Omarchy's own is now disabled"
+  else
+    say "  left Omarchy's workspace widget alone"
+    say "  to show slot numbers instead of real workspace ids, re-run with"
+    say "    ./install.sh --replace-workspaces"
+  fi
 fi
 
 say "done. Apply with: omarchy restart shell"

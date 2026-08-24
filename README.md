@@ -108,8 +108,13 @@ omarchy restart shell
 ```
 
 `install.sh` copies the plugin into `~/.config/omarchy/plugins/`, puts the CLI
-on your PATH, and writes a starter config. Everything lives under `$HOME` and
-needs no sudo. Drop `--with-url-handler` if you do not want link routing yet.
+on your PATH, writes a starter config, and enables the plugin. Everything lives
+under `$HOME` and needs no sudo.
+
+Nothing outside this plugin changes unless you ask. `--with-url-handler`
+reassigns your default browser so links follow the active space.
+`--replace-workspaces` swaps in the slot-numbered workspace widget and disables
+Omarchy's own. `--all` does both. `./install.sh --help` lists them.
 
 Add the space rows to the Omarchy menu:
 
@@ -208,7 +213,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 0.9.1, running on Omarchy 4.0.0 with no QML warnings.
+Version 1.0.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is

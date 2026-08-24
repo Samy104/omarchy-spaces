@@ -2,6 +2,7 @@
 var fs = require("fs"), path = require("path")
 var L = require("../SpacesLogic.js")
 var cfg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config", "spaces.example.json"), "utf8"))
+cfg.fallbackSpace = "personal"
 cfg.defaults = {apps: [{name: "SharedPlayer", shared: true}],
                 notifications: {allowUnassigned: false},
                 workspaces: {count: 10},

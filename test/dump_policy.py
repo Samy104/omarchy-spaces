@@ -10,6 +10,7 @@ cfg = json.load(open(os.path.join(here, "..", "config", "spaces.example.json")))
 # Exercise inheritance: move shared settings up into defaults and delete them
 # from one space, so the parity check covers the merged path rather than only
 # fully explicit spaces.
+cfg["fallbackSpace"] = "personal"
 cfg["defaults"] = {"apps": [{"name": "SharedPlayer", "shared": True}],
                    "notifications": {"allowUnassigned": False},
                    "workspaces": {"count": 10},

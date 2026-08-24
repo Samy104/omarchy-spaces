@@ -248,5 +248,41 @@ test("shared still obeys a full mute", function () {
   assert.strictEqual(L.isSharedApp(c, "YT Music"), true)
 })
 
+console.log("\ndefault (fallback) space")
+var FB = { fallbackSpace: "personal",
+           defaults: { apps: [{ name: "YT Music", shared: true }] },
+           spaces: [
+             { id: "personal", apps: ["Signal"],
+               notifications: { allowFrom: ["personal", "work"] } },
+             { id: "work", apps: ["Slack"],
+               notifications: { allowFrom: ["work"], allowUnassigned: false } }] }
+
+test("an unlisted app is owned by the default space", function () {
+  assert.strictEqual(L.spaceForApp(FB, "SomeEditor"), "personal")
+})
+test("an explicitly listed app still wins over the default", function () {
+  assert.strictEqual(L.spaceForApp(FB, "Slack"), "work")
+})
+test("a shared app never falls back", function () {
+  assert.strictEqual(L.spaceForApp(FB, "YT Music"), null)
+  assert.strictEqual(L.shouldShow(FB, "work", { app: "YT Music" }, 600).show, true)
+})
+test("unlisted apps follow the default space's permissions", function () {
+  assert.strictEqual(L.shouldShow(FB, "personal", { app: "SomeEditor" }, 600).show, true)
+  assert.strictEqual(L.shouldShow(FB, "work", { app: "SomeEditor" }, 600).show, false)
+})
+test("no default space leaves unlisted apps unassigned", function () {
+  var c = JSON.parse(JSON.stringify(FB))
+  delete c.fallbackSpace
+  assert.strictEqual(L.spaceForApp(c, "SomeEditor"), null)
+  assert.strictEqual(L.shouldShow(c, "work", { app: "SomeEditor" }, 600).reason, "unassigned-blocked")
+})
+test("a default space naming a space that does not exist is ignored", function () {
+  var c = JSON.parse(JSON.stringify(FB))
+  c.fallbackSpace = "ghost"
+  assert.strictEqual(L.fallbackSpace(c), null)
+  assert.strictEqual(L.spaceForApp(c, "SomeEditor"), null)
+})
+
 console.log("\n" + passed + " passed, " + failed + " failed\n")
 process.exit(failed === 0 ? 0 : 1)

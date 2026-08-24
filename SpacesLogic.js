@@ -200,6 +200,16 @@ function isSharedApp(config, appName) {
   return false
 }
 
+// The space that owns anything no space claims explicitly.
+//
+// Without this, every app has to be listed somewhere or it counts as
+// unassigned. With it, one space is the home for everything else, and only the
+// exceptions need naming.
+function fallbackSpace(config) {
+  var id = config && config.fallbackSpace
+  return (id && findSpace(config, id)) ? String(id) : null
+}
+
 function spaceForApp(config, appName) {
   var key = normalizeAppKey(appName)
   if (!key) return null
@@ -211,7 +221,9 @@ function spaceForApp(config, appName) {
       if (normalizeAppKey(entries[j].name) === key) return String(ids[i])
     }
   }
-  return null
+  // Shared apps belong to nobody on purpose, so they never fall back.
+  if (isSharedApp(config, appName)) return null
+  return fallbackSpace(config)
 }
 
 // The set of spaces whose notifications are allowed right now, given which
@@ -370,6 +382,7 @@ var api = {
   appEntry: appEntry,
   appEntries: appEntries,
   isSharedApp: isSharedApp,
+  fallbackSpace: fallbackSpace,
   sharedAppEntries: sharedAppEntries
 }
 

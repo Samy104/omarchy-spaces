@@ -215,10 +215,18 @@ class Window(Adw.ApplicationWindow):
             icon = Gtk.Label(label=space.get("icon") or "●")
             icon.add_css_class("title-3")
             row.add_prefix(icon)
+            marks = []
             if str(space.get("id")) == active:
-                badge = Gtk.Label(label="active")
+                marks.append("active")
+            if str(space.get("id")) == str(self.cfg.get("fallbackSpace", "")):
+                marks.append("default")
+            if marks:
+                badge = Gtk.Label(label=" \u00b7 ".join(marks))
                 badge.add_css_class("dim-label")
                 badge.add_css_class("caption")
+                badge.set_tooltip_text(
+                    "active: the space you are in now\n"
+                    "default: owns every app no space lists")
                 row.add_suffix(badge)
             self.space_list.append(row)
         target = self.space_list.get_row_at_index(self.selected)
@@ -395,10 +403,24 @@ class Window(Adw.ApplicationWindow):
             behaviour.add(r)
         page.add(behaviour)
 
-        default = Adw.PreferencesGroup(
+        default = Adw.PreferencesGroup(title="Spaces")
+
+        self.g_fallback = Adw.ComboRow(
             title="Default space",
-            description="Used on a fresh machine, before anything has been switched to.")
-        self.g_default = Adw.ComboRow(title="Space")
+            subtitle="Owns every app no space lists. Only the exceptions need naming.")
+        self.g_fallback.connect("notify::selected", self.on_general_changed)
+        default.add(self.g_fallback)
+
+        self.g_fallback_windows = Adw.SwitchRow(
+            title="Open unlisted apps in the default space",
+            subtitle="Far-reaching: every terminal, editor, and file manager lands "
+                     "there too, wherever you launch it. Off unless you want that.")
+        self.g_fallback_windows.connect("notify::active", self.on_general_changed)
+        default.add(self.g_fallback_windows)
+
+        self.g_default = Adw.ComboRow(
+            title="Startup space",
+            subtitle="Active on a fresh machine, before anything has been switched to.")
         self.g_default.connect("notify::selected", self.on_general_changed)
         default.add(self.g_default)
         page.add(default)
@@ -461,6 +483,8 @@ class Window(Adw.ApplicationWindow):
             self.g_switch_notify.set_active(self.cfg.get("switchNotification") is not False)
             ids = [str(s.get("id")) for s in self.cfg.get("spaces", []) if s.get("id")]
             fill_combo(self.g_default, ids, str(self.cfg.get("activeSpace", "")))
+            fill_combo(self.g_fallback, ids, str(self.cfg.get("fallbackSpace", "")))
+            self.g_fallback_windows.set_active(self.cfg.get("fallbackPlacesWindows") is True)
         finally:
             self.loading = False
 
@@ -474,6 +498,17 @@ class Window(Adw.ApplicationWindow):
             self.cfg["activeSpace"] = chosen
         else:
             self.cfg.pop("activeSpace", None)
+
+        fallback = combo_value(self.g_fallback)
+        if fallback:
+            self.cfg["fallbackSpace"] = fallback
+        else:
+            self.cfg.pop("fallbackSpace", None)
+
+        if self.g_fallback_windows.get_active():
+            self.cfg["fallbackPlacesWindows"] = True
+        else:
+            self.cfg.pop("fallbackPlacesWindows", None)
 
     def on_general_changed(self, *_a):
         if self.loading:
@@ -573,13 +608,18 @@ class Window(Adw.ApplicationWindow):
             # Same widgets serve a space and the defaults block, so the copy
             # has to stop claiming to be about "this space" on the Defaults page.
             defaults_mode = getattr(self, "editing_defaults", False)
+            is_fallback = (not defaults_mode
+                           and str(space.get("id")) == str(self.cfg.get("fallbackSpace", "")))
             self.g_apps.set_title("Apps in every space" if defaults_mode else "Apps in this space")
             self.g_apps.set_description(
                 "Claimed by any space that does not list its own. An app belongs to one "
                 "space: its notifications are routed there, and its windows open there."
                 if defaults_mode else
-                "An app belongs to one space. Its notifications are routed here, and its "
-                "windows open on this space's workspaces, wherever you launch it.")
+                ("This is the default space, so it already owns every app no other "
+                 "space lists. Add one here only to pin which slot it opens on."
+                 if is_fallback else
+                 "An app belongs to one space. Its notifications are routed here, and "
+                 "its windows open on this space's workspaces, wherever you launch it."))
             self.g_browser.set_description(
                 "Used by any space that does not set its own."
                 if defaults_mode else
@@ -599,7 +639,13 @@ class Window(Adw.ApplicationWindow):
             fill_combo(self.r_bg, cli_json("discover", "backgrounds"), str(look.get("background", "")))
 
             notif = space.get("notifications") or {}
+            fb = str(self.cfg.get("fallbackSpace", ""))
             self.r_unassigned.set_active(notif.get("allowUnassigned") is not False)
+            self.r_unassigned.set_sensitive(not fb)
+            self.r_unassigned.set_subtitle(
+                ("No effect: %s is the default space, so nothing is unassigned"
+                 % (self.cfg.get("fallbackSpace") or ""))
+                if fb else "Anything not listed under any space's apps")
             self.rebuild_allow(notif.get("allowFrom") or [])
             self.rebuild_windows(notif.get("schedule") or [])
             if not defaults_mode:
@@ -1097,7 +1143,7 @@ class Window(Adw.ApplicationWindow):
         self.apps = list(apps)
         if not self.apps:
             row = Adw.ActionRow(title="No apps",
-                                subtitle="Notifications from unlisted apps count as unassigned")
+                                subtitle="Unlisted apps fall to the default space")
             row.set_sensitive(False)
             self.g_apps.add(row)
             self.app_rows.append(row)

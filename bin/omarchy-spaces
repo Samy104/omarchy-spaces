@@ -321,7 +321,21 @@ def space_for_app(cfg, app):
                 continue
             if normalize_app_key(entry["name"]) == key:
                 return sid
-    return None
+    # Shared apps belong to nobody on purpose, so they never fall back.
+    if is_shared_app(cfg, app):
+        return None
+    return fallback_space(cfg)
+
+
+def fallback_space(cfg):
+    """The space that owns anything no space claims explicitly.
+
+    Without it every app has to be listed somewhere or it counts as unassigned.
+    With it one space is the home for everything else, and only the exceptions
+    need naming.
+    """
+    sid = cfg.get("fallbackSpace")
+    return str(sid) if sid and find_space(cfg, sid) else None
 
 
 def shared_app_entries(cfg):
@@ -495,7 +509,14 @@ def cmd_status(cfg, args):
         print("window     none, using baseline")
     allowed = ", ".join(pol["allowFrom"]) if pol["allowFrom"] else "(nothing)"
     print("allowing   %s" % allowed)
-    print("unassigned %s" % ("shown" if pol["allowUnassigned"] else "hidden"))
+    fb = fallback_space(cfg)
+    if fb:
+        owner = find_space(cfg, fb) or {}
+        allowed = fb in pol["allowFrom"]
+        print("unlisted   owned by %s, %s here"
+              % (owner.get("name") or fb, "shown" if allowed else "hidden"))
+    else:
+        print("unlisted   %s" % ("shown" if pol["allowUnassigned"] else "hidden"))
     return 0
 
 
@@ -1439,6 +1460,17 @@ def window_rule_lines(cfg):
     out = ["-- Park each app's windows in the space that owns it. Generated from the",
            "-- `apps` list of every space, so listing Steam under personal is enough.",
            "-- The `silent` suffix places the window without pulling you to it."]
+
+    # Optional catch-all, emitted first so the specific rules below override it.
+    # Off by default because it is genuinely far-reaching: every terminal,
+    # editor, and file manager opened anywhere lands in the fallback space,
+    # which is disruptive if you did not ask for it.
+    fb = fallback_space(cfg)
+    if fb and cfg.get("fallbackPlacesWindows") is True:
+        out.append("-- Everything not named below opens in the fallback space.")
+        out.append('o.window(%s, { workspace = %s })'
+                   % (lua_quote(".*"), lua_quote("%d silent" % (ws_offset(cfg, fb) + 1))))
+
     seen = set()
     for sid in space_ids(cfg):
         resolved = resolve_space(cfg, sid)

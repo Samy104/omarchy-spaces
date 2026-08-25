@@ -219,7 +219,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 1.1.1, running on Omarchy 4.0.0 with no QML warnings.
+Version 1.2.0, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is
@@ -241,10 +241,9 @@ A `defaults` block supplies values every space inherits, so a shared browser,
 schedule, or workspace count is written once. See
 [Defaults and inheritance](docs/Defaults-and-inheritance.md).
 
-The bar ships its own workspace widget so the numbers shown match the numbers
-you press. It is a second plugin directory only because Omarchy's third-party
-scanner reads one manifest per folder. It installs, enables, and uninstalls
-with the main plugin as one package. Omarchy's stock widget prints real ids, which read 11 to 20 in the
+The bar widget has two faces, chosen per placement by a `mode` setting. Place
+it twice, once in workspaces mode and once in indicator mode, and the numbers
+on the bar match the numbers you press. Omarchy's stock widget prints real ids, which read 11 to 20 in the
 work space.
 
 Audited against the Omarchy plugin
@@ -271,11 +270,9 @@ The CLI shells out to `hyprctl` for workspaces, and to `omarchy theme`,
 
 ```bash
 omarchy plugin disable io.github.samy104.omarchy-spaces
-omarchy plugin disable io.github.samy104.omarchy-spaces-workspaces
 omarchy plugin enable omarchy.workspaces
 omarchy-spaces remove-menu
 rm -rf ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces
-rm -rf ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces-workspaces
 rm -f ~/.local/bin/omarchy-spaces ~/.local/bin/omarchy-spaces-config
 rm -f ~/.local/share/applications/omarchy-spaces-open.desktop
 rm -f ~/.local/share/applications/omarchy-spaces-config.desktop

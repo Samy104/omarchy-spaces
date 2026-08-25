@@ -13,12 +13,24 @@ import qs.Ui
 //
 // Falls back to real ids when the Spaces service is missing or isolation is
 // turned off, which makes it a safe drop-in replacement either way.
-BarWidget {
+// Workspace numbers, scoped to the active space.
+//
+// Not a BarWidget: this is one of two faces the plugin's single bar widget can
+// wear, chosen by its `mode` setting. BarWidget.qml owns the registration.
+Item {
   id: root
-  moduleName: "io.github.samy104.omarchy-spaces-workspaces"
 
-  readonly property var spacesService: bar && bar.shell
-    ? bar.shell.serviceFor("io.github.samy104.omarchy-spaces") : null
+  property QtObject bar: null
+  property var settings: ({})
+  property var spacesService: null
+
+  function setting(name, fallback) {
+    var v = settings ? settings[name] : undefined
+    return v === undefined || v === null ? fallback : v
+  }
+
+  readonly property bool vertical: bar ? bar.vertical : false
+  readonly property int barSize: bar ? bar.barSize : Style.bar.sizeHorizontal
 
   // Coerced with !! because an && chain yields its last operand, and the
   // service's properties read back undefined for the first frame or two after

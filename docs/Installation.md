@@ -33,8 +33,13 @@ Nothing of Omarchy's own changes unless you ask for it.
 
 ## The workspace widget, and what it replaces
 
-This is the one step that turns off something of Omarchy's own, so it waits to
-be asked, and it is worth understanding before you ask.
+The plugin ships **one** bar widget with two faces, chosen per placement by a
+`mode` setting. Place it twice and you get both: the active space on the right,
+workspace numbers on the left. This is how Omarchy's own Spacer and Indicators
+work, and it is why the marketplace sees one plugin rather than two.
+
+Workspaces mode replaces Omarchy's own widget, which is the one step here that
+turns something of Omarchy's off, so it waits to be asked.
 
 **Why it exists.** Omarchy's own workspace widget only knows workspaces 1 to
 10. Its list is seeded with 1 to 5 and accepts ids `> 0 && <= 10`. A second
@@ -47,31 +52,39 @@ Stock widget, work space active, sitting on real workspace 19:
 It draws 1 to 6, highlights nothing, and marks nothing occupied. The workspace
 you are on is not in its list.
 
-**If you enable ours without disabling theirs**, both draw:
+**If you add ours without disabling theirs**, both draw:
 
 ![Both widgets enabled](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-both.png)
 
-Two runs of numbers. The first is Omarchy's, dim and inert. The second is ours.
-That is why `--replace-workspaces` does both halves rather than only enabling.
+That is why `--replace-workspaces` does both halves rather than only adding.
 
 **After the swap:**
 
 ![The slot-numbered widget](https://raw.githubusercontent.com/Samy104/omarchy-spaces/main/docs/screenshots/ws-ours.png)
 
 Slots 1 to 5, plus any other slot holding a window, with the focused slot drawn
-as a dot rather than a number. That is how Omarchy's own widget marks focus, so
-it should look familiar.
+as a dot rather than a number. That is how Omarchy's own widget marks focus.
 
 These are slots within the active space. The bar reads 1 to 10 in every space,
 while the real workspaces underneath are 1 to 10 in personal and 11 to 20 in
 work.
 
+**Doing it by hand.** `omarchy plugin enable --section left` *moves* the
+existing placement rather than adding another, so a second placement is written
+into `~/.config/omarchy/shell.json` directly:
+
+```json
+"left":  [ { "id": "io.github.samy104.omarchy-spaces", "mode": "workspaces" } ],
+"right": [ { "id": "io.github.samy104.omarchy-spaces", "mode": "indicator" } ]
+```
+
 **To undo it:**
 
 ```bash
 omarchy plugin enable omarchy.workspaces --section left
-omarchy plugin disable io.github.samy104.omarchy-spaces-workspaces
 ```
+
+then remove the left entry from `shell.json`.
 
 Your spaces are unaffected either way. This widget only draws numbers; the
 isolation itself does not depend on it.

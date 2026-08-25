@@ -2,12 +2,19 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Bar indicator for the active space.
+// One bar widget with two faces, chosen per placement by its `mode` setting.
 //
-// Left and right click open the Spaces picker in the Omarchy menu, middle
-// click cycles to the next space. The label carries the space icon and name,
-// and goes to the urgent color when the current policy blocks everything, so
-// a silent desktop is never ambiguous about whether it is silent on purpose.
+// The marketplace requires one plugin per repository, and Omarchy allows one
+// bar widget per plugin, so the space indicator and the workspace numbers
+// cannot be separate plugins. They do not have to be: allowMultiple lets the
+// same widget be placed twice with different settings, which is how Omarchy's
+// own Spacer and Indicators work. Put it on the left in workspaces mode and on
+// the right in indicator mode and the result is what two plugins gave, from
+// one manifest.
+//
+// Both faces are instantiated and one is hidden, rather than loaded on demand.
+// A Loader adds a frame where item is still null and the bar has already asked
+// for an implicit width, and the widget then measures zero and never recovers.
 BarWidget {
   id: root
   moduleName: "io.github.samy104.omarchy-spaces"
@@ -15,50 +22,27 @@ BarWidget {
   readonly property var spacesService: bar && bar.shell
     ? bar.shell.serviceFor("io.github.samy104.omarchy-spaces") : null
 
-  readonly property string spaceId: spacesService ? spacesService.activeSpaceId : ""
-  readonly property string spaceIcon: spacesService ? spacesService.iconFor(spaceId) : ""
-  readonly property string spaceName: spacesService ? spacesService.displayName(spaceId) : ""
-  readonly property bool filtering: spacesService ? spacesService.filtering : false
-  readonly property bool fullyMuted: spacesService ? spacesService.fullyMuted : false
+  readonly property bool workspacesMode: setting("mode", "indicator") === "workspaces"
 
-  readonly property bool showLabel: setting("showLabel", true)
-  readonly property bool showPolicyDot: setting("showPolicyDot", true)
+  implicitWidth: workspacesMode ? workspacesFace.implicitWidth : indicatorFace.implicitWidth
+  implicitHeight: workspacesMode ? workspacesFace.implicitHeight : indicatorFace.implicitHeight
+  visible: implicitWidth > 0
 
-  // A dot appended to the label rather than an overlaid Rectangle. The bar
-  // lays widgets out by implicit size, and a floating child would either be
-  // clipped or push the neighbours around.
-  readonly property string policyMark: {
-    if (!showPolicyDot || !filtering) return ""
-    return fullyMuted ? " ●" : " ○"
-  }
-
-  readonly property string label: {
-    if (!spacesService) return ""
-    if (spaceIcon === "" && spaceName === "") return ""
-    var text = spaceIcon
-    if (showLabel && !vertical && spaceName !== "") {
-      text = text === "" ? spaceName : text + " " + spaceName
-    }
-    return text + policyMark
-  }
-
-  visible: label !== ""
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
-
-  WidgetButton {
-    id: button
+  SpaceWorkspaces {
+    id: workspacesFace
     anchors.fill: parent
+    visible: root.workspacesMode
     bar: root.bar
-    text: root.label
-    active: root.fullyMuted
-    tooltipText: root.spaceName === "" ? "" : ("Space: " + root.spaceName)
+    settings: root.settings
+    spacesService: root.spacesService
+  }
 
-    onPressed: function (b) {
-      if (!root.bar) return
-      if (b === Qt.MiddleButton) root.bar.run("omarchy-spaces next")
-      else if (b === Qt.RightButton) root.bar.run("omarchy menu summon spaces")
-      else root.bar.run("omarchy menu summon spaces")
-    }
+  SpaceIndicator {
+    id: indicatorFace
+    anchors.fill: parent
+    visible: !root.workspacesMode
+    bar: root.bar
+    settings: root.settings
+    spacesService: root.spacesService
   }
 }

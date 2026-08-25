@@ -39,11 +39,6 @@ say "installing plugin to $PLUGIN_DIR"
 mkdir -p "$PLUGIN_DIR"
 cp -f "$REPO_DIR"/manifest.json "$REPO_DIR"/*.qml "$REPO_DIR"/SpacesLogic.js "$PLUGIN_DIR/"
 
-WS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.samy104.omarchy-spaces-workspaces"
-say "installing workspace widget to $WS_DIR"
-mkdir -p "$WS_DIR"
-cp -f "$REPO_DIR"/workspaces/* "$WS_DIR/"
-
 say "installing CLI to $BIN_DIR/omarchy-spaces"
 mkdir -p "$BIN_DIR"
 install -m 0755 "$REPO_DIR/bin/omarchy-spaces" "$BIN_DIR/omarchy-spaces"
@@ -95,10 +90,6 @@ fi
 say "validating config"
 "$BIN_DIR/omarchy-spaces" validate || true
 
-# Omarchy discovers exactly one manifest per third-party plugin directory, so a
-# second bar widget has to live in its own folder. They are one package: same
-# repo, same version, installed, enabled, and removed together.
-WS_ID="io.github.samy104.omarchy-spaces-workspaces"
 
 if [ "${OMARCHY_SPACES_NO_ENABLE:-}" = "1" ]; then
   say "skipping enable, OMARCHY_SPACES_NO_ENABLE is set"
@@ -113,12 +104,44 @@ else
   # while theirs is still on would show two rows of numbers, so it waits to
   # be asked.
   if [ "$REPLACE_WORKSPACES" = "1" ]; then
-    omarchy plugin enable "$WS_ID" --section left >/dev/null 2>&1 \
-      || say "  enable $WS_ID failed, run it by hand"
+    # A second placement of the same widget, on the left, in workspaces mode.
+    # `omarchy plugin enable --section left` would MOVE the existing one rather
+    # than add another, so the layout entry is written directly. allowMultiple
+    # in the manifest is what makes two placements legal.
+    python3 - "$PLUGIN_ID" <<'PYEOF' || say "  could not add the left placement"
+import json, os, sys
+plugin_id = sys.argv[1]
+path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                    "omarchy", "shell.json")
+d = json.load(open(path))
+layout = d["bar"]["layout"]
+
+def entries(section):
+    return [i for i in layout[section]
+            if (i.get("id") if isinstance(i, dict) else i) == plugin_id]
+
+# Leave whatever is already on the left alone if it is ours.
+if not entries("left"):
+    layout["left"].append({"id": plugin_id, "mode": "workspaces"})
+else:
+    for i in entries("left"):
+        if isinstance(i, dict):
+            i["mode"] = "workspaces"
+
+# Make sure the other placement stays an indicator.
+for section in ("center", "right"):
+    for i in entries(section):
+        if isinstance(i, dict):
+            i.setdefault("mode", "indicator")
+
+tmp = path + ".tmp"
+json.dump(d, open(tmp, "w"), indent=2)
+os.replace(tmp, path)
+PYEOF
     omarchy plugin disable omarchy.workspaces >/dev/null 2>&1 || true
     say ""
     say "  Workspace widget swapped:"
-    say "    enabled   $WS_ID"
+    say "    added     a second Spaces widget on the left, in workspaces mode"
     say "    DISABLED  omarchy.workspaces   (Omarchy's own, re-enable any time)"
     say ""
     say "  Expect the bar to show 1 to 10 in every space, with the focused"
@@ -127,7 +150,7 @@ else
     say "  19 it drew 1 to 6 with nothing highlighted."
     say ""
     say "  To undo:  omarchy plugin enable omarchy.workspaces --section left"
-    say "            omarchy plugin disable $WS_ID"
+    say "            then remove the left Spaces widget from ~/.config/omarchy/shell.json"
   else
     say ""
     say "  Left Omarchy's workspace widget (omarchy.workspaces) enabled and"

@@ -15,7 +15,7 @@ official [develop](https://omarchyplugins.com/develop.html) and
 | Semantic versioning | 0.3.0 |
 | Entry points are safe relative paths that exist | verified |
 | No symlinks in the plugin folder | verified |
-| `omarchy plugin validate` | passes for both plugins |
+| `omarchy plugin validate` | passes |
 | `qmllint -I $OMARCHY_PATH/shell` | zero errors |
 | `omarchy plugin list --json` reports id, kinds, enabled | verified |
 | Survives disable, re-enable, removal | verified |
@@ -24,42 +24,36 @@ official [develop](https://omarchyplugins.com/develop.html) and
 | No `omarchy.clonedFrom` key | verified |
 | Public repo, LICENSE, preview image | yes |
 | Icon shipped at six theme sizes | `assets/icon.png` |
+| Exactly one `manifest.json`, at the root | verified |
 | GitHub topics | omarchy, omarchy-plugin, omarchy-shell |
 
-## Why there are two plugin folders
+## One plugin, two placements
 
-This is one package. It ships two plugin directories because Omarchy's
-third-party scanner allows exactly one manifest per top-level folder:
+The marketplace requires exactly one `manifest.json`, at the repository root:
 
-```bash
-scan_thirdparty() {
-  for sub in "$dir"/*/; do
-    [[ -f "$sub/manifest.json" ]] || continue
-    emit_manifest thirdparty "$sub/manifest.json"
-  done
-}
+```js
+/^(?:[^/]+\/)?manifest\.json$/i          // root, or one directory deep
+if (submission && (manifestPaths.length !== 1 || manifestPaths[0] !== "manifest.json"))
+    checkError("unsupported-repository-layout", ...)
 ```
 
-First-party plugins get a wider scan, `find -mindepth 2 -maxdepth 3` matching
-`*.manifest.json`, which is how `omarchy.bar` ships Clock, Tray, and Workspaces
-from one source directory. Third-party plugins do not. A sibling manifest
-placed in a third-party folder is silently ignored, which I confirmed by adding
-one and rescanning.
+The first submission failed on exactly that. This repository shipped a second
+plugin under `workspaces/`, one directory deep, so the pattern matched two
+manifests and the rule rejected it.
 
-One bar widget per plugin id is also how Omarchy does it internally. Its own
-workspace widget is `omarchy.workspaces`, separate from `omarchy.bar`.
+The fix was not to bury the second manifest deeper until the regex stopped
+matching. That would have satisfied the check while ignoring what it is for.
+The two widgets are now one widget with two faces, chosen per placement by a
+`mode` setting, with `allowMultiple: true` in the manifest. Place it twice and
+you get what two plugins gave.
 
-So two bar widgets, the space indicator and the workspace slots, means two
-directories. It is a scanner constraint, not a packaging decision.
+Omarchy's own Spacer and Indicators do the same thing, so this is the idiomatic
+shape rather than a workaround.
 
-They behave as one package. Same repository, same version, installed by the
-same script, enabled together by `install.sh`, and removed together. The
-workspace widget declares in its description that it requires the main plugin,
-and falls back to real workspace ids if the main plugin is missing rather than
-breaking.
-
-Only the main plugin is submitted to the marketplace. Its manifest is in the
-repo root, which is what the marketplace reads.
+One thing that caught me out: `omarchy plugin enable --section left` *moves* an
+existing placement rather than adding a second one. A second placement has to
+be written into `shell.json` directly, which `install.sh --replace-workspaces`
+does.
 
 ## No panel kind
 
@@ -88,7 +82,6 @@ it shows up under those topics as well.
 ```bash
 ./test/run.sh
 omarchy plugin validate ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces
-omarchy plugin validate ~/.config/omarchy/plugins/io.github.samy104.omarchy-spaces-workspaces
 /usr/lib/qt6/bin/qmllint -I /usr/share/omarchy/shell *.qml workspaces/*.qml
 omarchy plugin list --json | grep samy104
 ./scripts/publish-wiki.sh

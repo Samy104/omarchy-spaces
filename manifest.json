@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "io.github.samy104.omarchy-spaces",
   "name": "Omarchy Spaces",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "author": "Samy Lemcelli",
-  "description": "Context spaces for Omarchy. Each space owns its browser profile, email, assistant accounts, and notification policy.",
+  "description": "Context spaces for Omarchy. Each space owns its browser profile, email, assistant accounts, workspaces, appearance, and notification policy.",
   "kinds": [
     "service",
     "bar-widget"
@@ -16,24 +16,36 @@
   },
   "barWidget": {
     "displayName": "Spaces",
-    "description": "Current space indicator with a switcher and policy settings",
-    "category": "System",
-    "allowMultiple": false,
+    "description": "Place it twice: once in indicator mode for the active space, once in workspaces mode for numbers scoped to that space.",
+    "category": "Workspaces",
+    "allowMultiple": true,
     "defaultSection": "right",
     "defaults": {
+      "mode": "indicator",
       "showLabel": true,
-      "showPolicyDot": true
+      "showPolicyDot": true,
+      "minSlots": 5
     },
     "schema": [
       {
+        "key": "mode",
+        "type": "string",
+        "label": "indicator or workspaces"
+      },
+      {
         "key": "showLabel",
         "type": "bool",
-        "label": "Show space name next to the icon"
+        "label": "Indicator: show the space name"
       },
       {
         "key": "showPolicyDot",
         "type": "bool",
-        "label": "Show a dot when notifications are being filtered"
+        "label": "Indicator: mark when notifications are filtered"
+      },
+      {
+        "key": "minSlots",
+        "type": "int",
+        "label": "Workspaces: always show at least this many"
       }
     ]
   },

@@ -8,6 +8,8 @@ echo "parity"
 ./test/parity.sh
 echo "embedded config"
 python3 test/embedded.test.py
+echo "safe file reads"
+timeout 60 python3 test/safe_read.test.py | tail -2
 echo "startup layouts"
 python3 test/startup.test.py | tail -2
 echo "theme mapping"

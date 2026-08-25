@@ -14,10 +14,12 @@ implementations against each other over every minute of the day, so a change to
 one without the other fails the suite.
 """
 
+import errno
 import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import time
 import sys
@@ -151,6 +153,92 @@ DEFAULT_CONFIG = r"""{
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
+# --- safe file reads ---------------------------------------------------------
+#
+# The shell plugin is a long-lived process, so anything it reads has to be
+# bounded and cannot be allowed to block. A plain `cat` is neither: it follows
+# symlinks, blocks forever on a FIFO, and will happily stream a file larger
+# than memory into a collector.
+#
+# Every read of a replaceable path goes through here instead:
+#
+#   O_NOFOLLOW   a symlink in place of the file fails rather than redirecting
+#                the read somewhere else
+#   O_NONBLOCK   opening a FIFO or a device returns immediately instead of
+#                waiting for a writer that may never come
+#   fstat on the same descriptor, not a second stat of the path, so the file
+#                checked is the file read and there is no window between them
+#   regular file, owner, and byte limit enforced before and during the read
+#
+# Rejections are not errors to recover from. The caller keeps whatever it last
+# parsed successfully, which is the safe direction to fail in.
+
+READ_LIMIT_CONFIG = 1 << 20      # 1 MiB, generous for JSON with many spaces
+READ_LIMIT_STATE = 4096          # a space id and a newline
+
+_READ_TARGETS = {
+    "config": lambda: (CONFIG_PATH, READ_LIMIT_CONFIG),
+    "active": lambda: (ACTIVE_PATH, READ_LIMIT_STATE),
+}
+
+
+def safe_read(path, limit):
+    """Read a regular file you own, up to limit bytes. Returns (text, reason)."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            return None, "is a symlink"
+        if e.errno == errno.ENOENT:
+            return None, "does not exist"
+        return None, "could not be opened: %s" % e.strerror
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return None, "is not a regular file"
+        if st.st_uid != os.getuid():
+            return None, "is not owned by you"
+        if st.st_size > limit:
+            return None, "is larger than %d bytes" % limit
+        chunks, total = [], 0
+        while True:
+            try:
+                chunk = os.read(fd, 65536)
+            except BlockingIOError:
+                return None, "would block"
+            if not chunk:
+                break
+            total += len(chunk)
+            # Checked while reading too: st_size is a snapshot and a file can
+            # grow between the stat and the last read.
+            if total > limit:
+                return None, "is larger than %d bytes" % limit
+            chunks.append(chunk)
+    finally:
+        os.close(fd)
+    return b"".join(chunks).decode("utf-8", "replace"), None
+
+
+def cmd_read_file(cfg_unused, args):
+    """Bounded read of one of this plugin's own files, for the shell plugin.
+
+    The plugin runs this instead of `cat` so the long-lived shell never reads
+    something unbounded, blocking, or redirected by a symlink.
+    """
+    what = args[0] if args else ""
+    if what not in _READ_TARGETS:
+        die("usage: omarchy-spaces read-file <config|active>")
+    path, limit = _READ_TARGETS[what]()
+    text, reason = safe_read(path, limit)
+    if reason is not None:
+        print("%s %s" % (path, reason), file=sys.stderr)
+        return 1
+    sys.stdout.write(text)
+    return 0
+
+
 def die(msg, code=1):
     print("omarchy-spaces: " + msg, file=sys.stderr)
     sys.exit(code)
@@ -159,9 +247,11 @@ def die(msg, code=1):
 def load_config():
     if not os.path.exists(CONFIG_PATH):
         die("no config at %s\nRun: omarchy-spaces init" % CONFIG_PATH, 2)
+    text, reason = safe_read(CONFIG_PATH, READ_LIMIT_CONFIG)
+    if reason is not None:
+        die("config at %s %s" % (CONFIG_PATH, reason), 2)
     try:
-        with open(CONFIG_PATH) as fh:
-            cfg = json.load(fh)
+        cfg = json.loads(text)
     except json.JSONDecodeError as e:
         die("config is not valid JSON: %s" % e, 2)
     if not isinstance(cfg.get("spaces"), list) or not cfg["spaces"]:
@@ -393,14 +483,11 @@ def minutes_now():
 
 
 def read_active(cfg):
-    if os.path.exists(ACTIVE_PATH):
-        try:
-            with open(ACTIVE_PATH) as fh:
-                val = fh.read().strip()
-            if find_space(cfg, val):
-                return val
-        except OSError:
-            pass
+    text, reason = safe_read(ACTIVE_PATH, READ_LIMIT_STATE)
+    if reason is None:
+        val = text.strip()
+        if find_space(cfg, val):
+            return val
     fallback = cfg.get("activeSpace")
     if find_space(cfg, fallback):
         return str(fallback)
@@ -2241,6 +2328,7 @@ USAGE = """omarchy-spaces, context spaces for Omarchy
   get <field>             read a field off the active space
   init [--force]          write a starter config
   validate                check the config for gaps, overlaps, and bad refs
+  read-file <config|active>  bounded read used by the shell plugin
   install-menu            add the space rows to the Omarchy menu
   remove-menu             take them back out
   menu                    print the menu rows without writing anything
@@ -2291,6 +2379,7 @@ COMMANDS = {
     "move-to-space": cmd_move_to_space, "windows": cmd_windows,
     "appearance": cmd_appearance, "discover": cmd_discover,
     "export": cmd_export, "import": cmd_import, "keybinds": cmd_keybinds,
+    "read-file": cmd_read_file,
     "windowrules": cmd_windowrules, "startup": cmd_startup,
 }
 

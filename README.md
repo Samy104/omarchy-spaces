@@ -219,7 +219,7 @@ single decision differs. That is 2880 comparisons per run.
 
 ## Status
 
-Version 1.2.0, running on Omarchy 4.0.0 with no QML warnings.
+Version 1.2.1, running on Omarchy 4.0.0 with no QML warnings.
 
 Verified on a live shell: the bar widget renders and follows a switch made from
 anywhere, a personal-app notification is suppressed while the work space is

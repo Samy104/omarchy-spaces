@@ -210,6 +210,13 @@ Item {
     onTriggered: {
       var m = Logic.minutesNow()
       if (m !== service.nowMinutes) service.nowMinutes = m
+
+      // Catches an in-place hand edit, which produces no directory event.
+      // Both reads are bounded and the results only replace state when they
+      // actually differ, so a tick that finds nothing new costs one small
+      // read each.
+      if (!configProbe.running) configProbe.running = true
+      if (!activeProbe.running) activeProbe.running = true
     }
   }
 
@@ -236,7 +243,12 @@ Item {
 
   Process {
     id: configProbe
-    command: ["bash", "-c", "cat " + JSON.stringify(service.configPath) + " 2>/dev/null"]
+    // Not `cat`. The CLI's reader opens with O_NOFOLLOW and O_NONBLOCK, checks
+    // the same descriptor it read, and refuses anything that is not a regular
+    // file you own within a byte limit. A symlink, a FIFO, or an oversized file
+    // in place of the config would otherwise redirect, stall, or inflate this
+    // long-lived shell process.
+    command: ["omarchy-spaces", "read-file", "config"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -268,7 +280,7 @@ Item {
 
   Process {
     id: activeProbe
-    command: ["bash", "-c", "cat " + JSON.stringify(service.activePath) + " 2>/dev/null"]
+    command: ["omarchy-spaces", "read-file", "active"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -278,16 +290,14 @@ Item {
     }
   }
 
-  // Both the directory and the file, because the two ways of saving a file
-  // produce different events and each watcher misses one of them.
+  // Directory watches only, used purely as a signal to re-read. FileView on
+  // the files themselves would mean this long-lived process reading a path
+  // that can be replaced, which is what the reads above are careful to avoid.
   //
-  //   atomic rename (the CLI, most editors)  -> directory event, no file event
-  //                                             the watched inode is replaced
-  //   in-place write (nano, cat >, sed -i)   -> file event, no directory event
-  //                                             the directory did not change
-  //
-  // Watching only the directory was the original bug: editing spaces.json by
-  // hand in an in-place editor changed nothing until the shell restarted.
+  // A directory watch fires on an atomic rename, which is how the CLI and the
+  // configuration app both save, so those are picked up at once. An in-place
+  // write changes the file without changing the directory and produces no
+  // event, so the tick below re-reads on a timer to catch hand edits.
   FileView {
     path: service.configDir
     watchChanges: true
@@ -296,26 +306,10 @@ Item {
   }
 
   FileView {
-    path: service.configPath
-    watchChanges: true
-    printErrors: false
-    onFileChanged: configProbe.running = true
-    onLoadFailed: { /* not written yet; the directory watcher covers creation */ }
-  }
-
-  FileView {
     path: service.stateDir
     watchChanges: true
     printErrors: false
     onFileChanged: activeProbe.running = true
-  }
-
-  FileView {
-    path: service.activePath
-    watchChanges: true
-    printErrors: false
-    onFileChanged: activeProbe.running = true
-    onLoadFailed: { /* no state file until the first switch */ }
   }
 
   Process {

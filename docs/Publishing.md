@@ -77,6 +77,35 @@ against the current commit before a maintainer reviews it.
 Add the `omarchy-shell` and `omarchy-plugin` topics to the GitHub repository so
 it shows up under those topics as well.
 
+## Reading replaceable paths
+
+The shell plugin is a long-lived process, so it never reads its config or state
+file with `cat`. A marketplace security review flagged that, correctly: `cat`
+follows symlinks, blocks forever on a FIFO, and streams a file of any size into
+a collector.
+
+Both reads now go through `omarchy-spaces read-file`, which opens with
+`O_NOFOLLOW` and `O_NONBLOCK`, calls `fstat` on the same descriptor it will read
+from rather than stat-ing the path a second time, and refuses anything that is
+not a regular file owned by the caller within a byte limit. The limit is checked
+while reading as well as before, since a file can grow between the stat and the
+last read.
+
+`FileView` on those two files is gone as well, for the same reason: it is a read
+of a replaceable path by the long-lived process. Directory watches remain, used
+only as a signal to re-read.
+
+That costs one thing worth stating. A directory watch fires on an atomic rename,
+which is how the CLI and the configuration app both save, so those apply at
+once. An in-place hand edit changes the file without changing the directory and
+produces no event, so it is picked up on the service's existing tick instead,
+within about twenty seconds.
+
+`test/safe_read.test.py` covers each refusal: symlink, FIFO, directory, device
+node, oversized, and the boundary where a file exactly at the limit is still
+read. The FIFO case runs under a timeout, because the failure mode being tested
+is a hang rather than a wrong answer.
+
 ## Before each release
 
 ```bash
